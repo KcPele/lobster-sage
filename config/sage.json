@@ -1,0 +1,26 @@
+{
+  "network": "base-sepolia",
+  "sage": {
+    "mode": "manual",
+    "predictionInterval": 21600,
+    "yieldRebalanceInterval": 3600,
+    "minConfidence": 65,
+    "maxAllocation": "1000 USDC"
+  },
+  "yield": {
+    "enabled": true,
+    "protocols": ["aave", "uniswap"],
+    "maxSlippage": 0.005,
+    "minHealthFactor": 1.5
+  },
+  "social": {
+    "twitter": {
+      "enabled": false,
+      "postPredictions": true,
+      "postYieldReports": true
+    },
+    "farcaster": {
+      "enabled": false
+    }
+  }
+}

@@ -83,7 +83,7 @@ export class FarcasterClient {
    */
   private getAuthHeaders(): Record<string, string> {
     return {
-      'api-key': this.config.apiKey,
+      'x-api-key': this.config.apiKey, // Neynar uses x-api-key or api_key
       'Content-Type': 'application/json',
     };
   }

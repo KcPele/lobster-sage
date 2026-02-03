@@ -188,7 +188,7 @@ You are LobsterSage, an autonomous AI agent that predicts crypto markets and opt
 
 ## How to Use LobsterSage
 
-The LobsterSage API server runs at `http://localhost:3847`. Use curl commands to interact with it.
+The LobsterSage API server runs at `https://lobster.up.railway.app`. Use curl commands to interact with it.
 
 ### Available Commands
 
@@ -196,34 +196,34 @@ When the user asks about:
 
 **Portfolio/Balance/Status:**
 ```bash
-curl -s http://localhost:3847/portfolio
+curl -s https://lobster.up.railway.app/portfolio
 ```
 
 **Make a Prediction:**
 ```bash
-curl -s -X POST http://localhost:3847/predict \
+curl -s -X POST https://lobster.up.railway.app/predict \
   -H "Content-Type: application/json" \
   -d '{"market": "ETH"}'
 ```
 
 **Market Analysis:**
 ```bash
-curl -s http://localhost:3847/analysis
+curl -s https://lobster.up.railway.app/analysis
 ```
 
 **Yield Opportunities:**
 ```bash
-curl -s http://localhost:3847/yields
+curl -s https://lobster.up.railway.app/yields
 ```
 
 **Optimize Yields:**
 ```bash
-curl -s -X POST http://localhost:3847/yields/optimize
+curl -s -X POST https://lobster.up.railway.app/yields/optimize
 ```
 
 **Reputation Score:**
 ```bash
-curl -s http://localhost:3847/reputation
+curl -s https://lobster.up.railway.app/reputation
 ```
 
 ## Response Formatting
@@ -238,15 +238,15 @@ Always format responses in a friendly, engaging way:
 ## Example Interactions
 
 User: "What's my portfolio?"
-→ Execute: `curl -s http://localhost:3847/portfolio`
+→ Execute: `curl -s https://lobster.up.railway.app/portfolio`
 → Format the JSON response nicely
 
 User: "Make a prediction for ETH"
-→ Execute: `curl -s -X POST http://localhost:3847/predict -H "Content-Type: application/json" -d '{"market": "ETH"}'`
+→ Execute: `curl -s -X POST https://lobster.up.railway.app/predict -H "Content-Type: application/json" -d '{"market": "ETH"}'`
 → Present the prediction with confidence level
 
 User: "Find me good yields"
-→ Execute: `curl -s http://localhost:3847/yields`
+→ Execute: `curl -s https://lobster.up.railway.app/yields`
 → List opportunities sorted by APY
 
 ## Autonomous Mode
@@ -402,7 +402,7 @@ export default function (api: any) {
     description: "Get LobsterSage portfolio summary including balance, predictions, and yields",
     parameters: Type.Object({}),
     async execute() {
-      const response = await fetch('http://localhost:3847/portfolio');
+      const response = await fetch('https://lobster.up.railway.app/portfolio');
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     },
@@ -416,7 +416,7 @@ export default function (api: any) {
       market: Type.String({ description: "Market to predict (e.g., ETH, BTC)" }),
     }),
     async execute(_id: string, params: { market: string }) {
-      const response = await fetch('http://localhost:3847/predict', {
+      const response = await fetch('https://lobster.up.railway.app/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ market: params.market }),
@@ -432,7 +432,7 @@ export default function (api: any) {
     description: "Get current DeFi yield opportunities on Base",
     parameters: Type.Object({}),
     async execute() {
-      const response = await fetch('http://localhost:3847/yields');
+      const response = await fetch('https://lobster.up.railway.app/yields');
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     },
@@ -444,7 +444,7 @@ export default function (api: any) {
     description: "Get LobsterSage reputation score and prediction history",
     parameters: Type.Object({}),
     async execute() {
-      const response = await fetch('http://localhost:3847/reputation');
+      const response = await fetch('https://lobster.up.railway.app/reputation');
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     },
@@ -595,7 +595,7 @@ openclaw doctor       # Run diagnostics
 
 ### API Connection Issues
 ```bash
-curl http://localhost:3847/health  # Test API directly
+curl https://lobster.up.railway.app/health  # Test API directly
 ```
 
 ### Telegram Not Responding

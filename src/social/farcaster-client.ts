@@ -83,7 +83,7 @@ export class FarcasterClient {
    */
   private getAuthHeaders(): Record<string, string> {
     return {
-      'x-api-key': this.config.apiKey,
+      'api-key': this.config.apiKey,
       'Content-Type': 'application/json',
     };
   }

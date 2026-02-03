@@ -29,7 +29,6 @@ export class LobsterSage {
   private yieldOptimizer: YieldOptimizer;
   private twitter: TwitterClient | null = null;
   private farcaster: FarcasterClient | null = null;
-  // @ts-expect-error Aave integration for yield cycles
   private aave!: AaveV3;
   private config: Config;
   
@@ -74,18 +73,19 @@ export class LobsterSage {
     });
     await this.wallet.initialize();
     
-    // Initialize prophesier with contract
+    // Initialize prophesier with contract and network
+    const network = this.config.network === 'base-mainnet' ? 'base' : 'baseSepolia';
     this.prophesier = new Prophesier(
       this.config.prophecyNftContract,
-      this.wallet
+      this.wallet,
+      network
     );
     
     // Initialize reputation system
     this.reputation = getReputationSystem(this.config.reputationContract);
     await this.reputation.initialize();
     
-    // Initialize AaveV3
-    const network = this.config.network === 'base-mainnet' ? 'base' : 'baseSepolia';
+    // Initialize AaveV3 (reuse network variable from above)
     this.aave = new AaveV3(network);
     
     // Initialize social clients if configured
@@ -105,8 +105,8 @@ export class LobsterSage {
       });
     }
     
-    // Initialize yield optimizer
-    await this.yieldOptimizer.initialize(this.wallet);
+    // Initialize yield optimizer with AaveV3 for real DeFi interactions
+    await this.yieldOptimizer.initialize(this.wallet, this.aave);
     
     const address = await this.wallet.getAddress();
     const balance = await this.wallet.getBalance();

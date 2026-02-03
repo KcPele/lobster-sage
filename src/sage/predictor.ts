@@ -38,6 +38,7 @@ export interface Prediction {
   reasoning: string;
   timestamp: number;
   stakeAmount?: number;
+  tokenAddress?: string; // Contract address for dynamic token trading (e.g., "0x...")
 }
 
 export interface PredictionConfig {

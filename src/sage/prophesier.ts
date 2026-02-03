@@ -111,12 +111,17 @@ export class Prophesier {
   private prophecies: Map<string, ProphecyNFT> = new Map();
   private activePredictions: Set<string> = new Set();
   private uniswap: UniswapV3 | null = null;
-  private enableRealTrading: boolean = false;
+  private enableRealTrading: boolean = true; // Enable real Uniswap trading by default
   private enableRealMinting: boolean = true; // Enable real NFT minting by default
 
-  constructor(contractAddress: string, wallet: WalletManager) {
+
+  constructor(contractAddress: string, wallet: WalletManager, network: 'base' | 'baseSepolia' = 'baseSepolia') {
     this.wallet = wallet;
     this.contractAddress = contractAddress as Address;
+    
+    // Initialize Uniswap V3 by default for real trading
+    this.uniswap = new UniswapV3(network);
+    console.log(`🔄 UniswapV3 initialized on ${network} (real trading enabled)`);
   }
 
   /**
@@ -348,6 +353,7 @@ export class Prophesier {
   /**
    * Stake on a prediction by trading
    * Uses Uniswap V3 for real trades if enabled, otherwise simulates
+   * Supports any token via prediction.tokenAddress or symbol lookup
    */
   async stakeOnPrediction(prediction: Prediction): Promise<TradeResult> {
     console.log(`💰 Staking on prediction: ${prediction.direction} ${prediction.market}`);
@@ -359,7 +365,10 @@ export class Prophesier {
     
     // Determine trade direction
     const tradeDirection = prediction.direction === 'bullish' ? 'buy' : 'sell';
-    const token = prediction.market === 'ETH' ? 'WETH' : prediction.market;
+    
+    // Use tokenAddress if provided, otherwise fall back to market symbol
+    const tokenIdentifier = prediction.tokenAddress || prediction.market;
+    const token = prediction.market === 'ETH' ? 'WETH' : tokenIdentifier;
 
     // Try to execute real trade if enabled
     if (this.enableRealTrading && this.uniswap) {
@@ -370,7 +379,7 @@ export class Prophesier {
           token
         );
         
-        console.log(`✅ REAL trade executed: ${tradeDirection} ${stakeAmount} ${token}`);
+        console.log(`✅ REAL trade executed: ${tradeDirection} ${stakeAmount} ETH → ${prediction.market}`);
         console.log(`   Tx Hash: ${swapResult.hash}`);
         
         prediction.stakeAmount = stakeAmount;
@@ -378,7 +387,7 @@ export class Prophesier {
         return {
           hash: swapResult.hash,
           amount: stakeAmount,
-          token,
+          token: prediction.market,
           direction: tradeDirection
         };
       } catch (error) {
@@ -390,11 +399,11 @@ export class Prophesier {
     const tradeResult: TradeResult = {
       hash: `0xsim_${Math.random().toString(16).substr(2, 60)}`,
       amount: stakeAmount,
-      token,
+      token: prediction.market,
       direction: tradeDirection
     };
 
-    console.log(`✅ SIMULATED trade: ${tradeDirection} ${stakeAmount} ${token}`);
+    console.log(`✅ SIMULATED trade: ${tradeDirection} ${stakeAmount} ETH → ${prediction.market}`);
     
     // Update prediction with stake
     prediction.stakeAmount = stakeAmount;
@@ -436,25 +445,42 @@ export class Prophesier {
   }
 
   /**
-   * Get token address from symbol
+   * Get token address from symbol or return direct address
+   * Supports both symbols (e.g., "ETH") and direct addresses (e.g., "0x...")
    */
-  private getTokenAddress(symbol: string, tokens: typeof BASE_TOKENS): `0x${string}` {
-    const upperSymbol = symbol.toUpperCase();
-    
-    // Map common symbols to addresses
-    const tokenMap: Record<string, keyof typeof BASE_TOKENS> = {
-      'ETH': 'WETH',
-      'WETH': 'WETH',
-      'USDC': 'USDC',
-      'DAI': 'DAI',
-    };
-
-    const tokenKey = tokenMap[upperSymbol];
-    if (tokenKey && tokens[tokenKey]) {
-      return tokens[tokenKey];
+  private getTokenAddress(symbolOrAddress: string, tokens: typeof BASE_TOKENS): `0x${string}` {
+    // If it's already a valid address, use it directly
+    if (symbolOrAddress.startsWith('0x') && symbolOrAddress.length === 42) {
+      console.log(`🔗 Using direct token address: ${symbolOrAddress}`);
+      return symbolOrAddress as `0x${string}`;
     }
 
-    // Default to USDC for unknown tokens
+    const upperSymbol = symbolOrAddress.toUpperCase();
+    
+    // Extended token map with popular Base ecosystem tokens
+    const tokenMap: Record<string, `0x${string}`> = {
+      // Core tokens (from BASE_TOKENS)
+      'ETH': tokens.WETH,
+      'WETH': tokens.WETH,
+      'USDC': tokens.USDC,
+      'DAI': tokens.DAI,
+      // Popular Base ecosystem tokens (mainnet addresses)
+      'AERO': '0x940181a94A35A4569E4529A3CDfB74e38FD98631' as `0x${string}`,
+      'BRETT': '0x532f27101965dd16442E59d40670FaF5eBB142E4' as `0x${string}`,
+      'TOSHI': '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4' as `0x${string}`,
+      'DEGEN': '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed' as `0x${string}`,
+      'CBETH': '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22' as `0x${string}`,
+      'USDBC': '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA' as `0x${string}`,
+    };
+
+    const address = tokenMap[upperSymbol];
+    if (address) {
+      console.log(`🪙 Resolved ${upperSymbol} to ${address}`);
+      return address;
+    }
+
+    // Default to USDC if unknown symbol
+    console.log(`⚠️ Unknown token symbol "${symbolOrAddress}", defaulting to USDC`);
     return tokens.USDC;
   }
 

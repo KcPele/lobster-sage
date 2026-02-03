@@ -175,6 +175,76 @@ app.get('/reputation', requireSage, async (_req: Request, res: Response) => {
 // ============ OpenClaw Integration ============
 // These endpoints are called by OpenClaw - it handles scheduling/orchestration
 
+// ============ Resolution ============
+
+// Resolve a prophecy (mark as correct/incorrect after timeframe)
+app.post('/resolve', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { tokenId, wasCorrect, accuracyScore } = req.body;
+    
+    if (tokenId === undefined) {
+      res.status(400).json({ error: 'tokenId is required' });
+      return;
+    }
+
+    const result = await sage!.resolveProphecy(
+      parseInt(tokenId),
+      wasCorrect ?? true,
+      accuracyScore ?? 5000
+    );
+
+    res.json({
+      status: 'resolved',
+      tokenId,
+      wasCorrect: result.successful,
+      txHash: result.txHash,
+      basescanUrl: `https://sepolia.basescan.org/tx/${result.txHash}`,
+      message: result.successful 
+        ? 'Prediction was CORRECT! Stake + reward returned.' 
+        : 'Prediction was WRONG. Stake forfeited.'
+    });
+  } catch (error: any) {
+    console.error('Resolution error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get prophecies ready to resolve
+app.get('/prophecies/pending', requireSage, async (_req: Request, res: Response) => {
+  try {
+    const ready = sage!.getPropheciesReadyToResolve();
+    const active = sage!.getActivePropheciesFromAgent();
+    
+    res.json({
+      readyToResolve: ready,
+      active: active,
+      message: `${ready.length} prophecies ready to resolve, ${active.length} still active`
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ Farcaster ============
+
+// Test Farcaster posting
+app.post('/farcaster/post', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { message } = req.body;
+    const text = message || '🦞 LobsterSage is live on Base! Testing Farcaster integration...';
+    
+    const result = await sage!.postToFarcaster(text);
+    res.json({
+      status: 'posted',
+      hash: result?.hash,
+      message: text
+    });
+  } catch (error: any) {
+    console.error('Farcaster post error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ NFT Operations ============
 
 // Make prediction AND mint as NFT in one call - REAL ONCHAIN TX

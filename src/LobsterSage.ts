@@ -383,6 +383,48 @@ Built on @base with @coinbase AgentKit 🦞`;
   }
 
   /**
+   * Post to Farcaster
+   */
+  async postToFarcaster(text: string): Promise<{ hash: string } | null> {
+    if (!this.farcaster) {
+      console.log('⚠️ Farcaster not configured');
+      return null;
+    }
+    
+    console.log(`📢 Posting to Farcaster: ${text.substring(0, 50)}...`);
+    const result = await this.farcaster.postCast({ text });
+    console.log(`✅ Posted to Farcaster: ${result.hash}`);
+    return result;
+  }
+
+  /**
+   * Resolve a prophecy - mark it as correct or incorrect
+   * Called after the prediction timeframe ends
+   */
+  async resolveProphecy(
+    tokenId: number,
+    wasCorrect: boolean,
+    accuracyScore: number = 5000
+  ): Promise<{ txHash: string; successful: boolean }> {
+    console.log(`⚖️ Resolving prophecy #${tokenId}...`);
+    return this.prophesier.resolveProphecy(tokenId, wasCorrect, accuracyScore);
+  }
+
+  /**
+   * Get prophecies that are ready to be resolved
+   */
+  getPropheciesReadyToResolve(): any[] {
+    return this.prophesier.getPropheciesReadyToResolve();
+  }
+
+  /**
+   * Get all active prophecies
+   */
+  getActivePropheciesFromAgent(): any[] {
+    return this.prophesier.getActiveProphecies();
+  }
+
+  /**
    * Run a single prediction cycle (for testing/demo)
    * This is the same as what autonomous mode does, but on-demand
    */

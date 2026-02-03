@@ -3,7 +3,7 @@ import { Prediction } from './predictor';
 import { UniswapV3, BASE_TOKENS, type SwapResult } from '../defi/UniswapV3';
 import { parseUnits, parseEther, encodeFunctionData, type Address } from 'viem';
 
-// ProphecyNFT Contract ABI (minimal for minting)
+// ProphecyNFT Contract ABI (for minting and resolving)
 const PROPHECY_NFT_ABI = [
   {
     name: 'mintProphecy',
@@ -18,6 +18,42 @@ const PROPHECY_NFT_ABI = [
       { name: 'uri', type: 'string' }
     ],
     outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    name: 'resolveProphecy',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'successful', type: 'bool' },
+      { name: 'accuracyScore', type: 'uint256' }
+    ],
+    outputs: []
+  },
+  {
+    name: 'getProphecy',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'prophet', type: 'address' },
+          { name: 'target', type: 'string' },
+          { name: 'predictionType', type: 'uint256' },
+          { name: 'prediction', type: 'string' },
+          { name: 'confidence', type: 'uint256' },
+          { name: 'stakeAmount', type: 'uint256' },
+          { name: 'createdAt', type: 'uint256' },
+          { name: 'resolvesAt', type: 'uint256' },
+          { name: 'resolved', type: 'bool' },
+          { name: 'successful', type: 'bool' },
+          { name: 'accuracyScore', type: 'uint256' }
+        ]
+      }
+    ]
   },
   {
     name: 'mintFee',
@@ -244,6 +280,72 @@ export class Prophesier {
   }
 
   /**
+   * Resolve a prophecy - called by agent after timeframe ends
+   * Checks if prediction was correct and updates onchain
+   */
+  async resolveProphecy(
+    onchainTokenId: number,
+    wasCorrect: boolean,
+    accuracyScore: number = 5000 // 0-10000, default 50%
+  ): Promise<{ txHash: string; successful: boolean }> {
+    console.log(`⚖️ Resolving prophecy #${onchainTokenId}...`);
+    console.log(`   Was correct: ${wasCorrect}`);
+    console.log(`   Accuracy score: ${accuracyScore / 100}%`);
+
+    if (!this.contractAddress || this.contractAddress === '0x0000000000000000000000000000000000000000') {
+      throw new Error('Contract address not configured');
+    }
+
+    const walletProvider = this.wallet.getWalletProvider();
+    if (!walletProvider) {
+      throw new Error('Wallet provider not initialized');
+    }
+
+    // Encode the resolve function call
+    const data = encodeFunctionData({
+      abi: PROPHECY_NFT_ABI,
+      functionName: 'resolveProphecy',
+      args: [BigInt(onchainTokenId), wasCorrect, BigInt(accuracyScore)]
+    });
+
+    // Send transaction
+    const txHash = await walletProvider.sendTransaction({
+      to: this.contractAddress,
+      data: data,
+    });
+
+    console.log(`✅ Prophecy resolved! TX: ${txHash}`);
+    console.log(`🔗 View on Basescan: https://sepolia.basescan.org/tx/${txHash}`);
+
+    if (wasCorrect) {
+      console.log(`🎉 Prediction was CORRECT! Stake + reward returned.`);
+    } else {
+      console.log(`❌ Prediction was WRONG. Stake forfeited.`);
+    }
+
+    return { txHash, successful: wasCorrect };
+  }
+
+  /**
+   * Get all active (unresolved) prophecies
+   */
+  getActiveProphecies(): ProphecyNFT[] {
+    return Array.from(this.prophecies.values()).filter(p => p.status === 'active');
+  }
+
+  /**
+   * Check which prophecies are ready to resolve (timeframe passed)
+   */
+  getPropheciesReadyToResolve(): ProphecyNFT[] {
+    const now = Date.now();
+    return this.getActiveProphecies().filter(p => {
+      const timeframeDays = parseInt(p.timeframe) || 7;
+      const resolveTime = p.mintedAt + (timeframeDays * 24 * 60 * 60 * 1000);
+      return now >= resolveTime;
+    });
+  }
+
+  /**
    * Stake on a prediction by trading
    * Uses Uniswap V3 for real trades if enabled, otherwise simulates
    */
@@ -406,13 +508,9 @@ export class Prophesier {
   }
 
   /**
-   * Resolve a prophecy when prediction period ends
+   * Mark a local prophecy record as resolved
    */
-  async resolveProphecy(
-    tokenId: string, 
-    success: boolean, 
-    profitLoss: number
-  ): Promise<void> {
+  markProphecyResolved(tokenId: string, success: boolean): void {
     const prophecy = this.prophecies.get(tokenId);
     if (!prophecy) return;
 
@@ -420,7 +518,7 @@ export class Prophesier {
     this.prophecies.set(tokenId, prophecy);
     this.activePredictions.delete(prophecy.predictionId);
 
-    console.log(`✅ Prophecy #${tokenId} resolved: ${success ? 'WIN' : 'LOSS'} (${profitLoss})`);
+    console.log(`📝 Local prophecy #${tokenId} marked as ${success ? 'WIN' : 'LOSS'}`);
   }
 
   /**

@@ -61,7 +61,7 @@ export function loadConfig(): Config {
     emergencyPause: process.env.EMERGENCY_PAUSE,
     whitelistOnly: process.env.WHITELIST_ONLY,
     twitterEnabled: process.env.TWITTER_API_KEY ? true : false,
-    farcasterEnabled: process.env.FARCASTER_MNEMONIC ? true : false,
+    farcasterEnabled: process.env.NEYNAR_API_KEY ? true : false,
   });
 
   return config;

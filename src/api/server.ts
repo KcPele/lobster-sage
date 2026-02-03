@@ -229,7 +229,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 // ============ Start Server ============
 
-const PORT = process.env.LOBSTER_SAGE_PORT || 3847;
+const PORT = process.env.PORT || process.env.LOBSTER_SAGE_PORT || 3847;
 
 initSage().then(() => {
   app.listen(PORT, () => {

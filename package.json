@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "start": "tsx src/api/server.ts",
     "api": "tsx src/api/server.ts",
     "api:watch": "tsx watch src/api/server.ts",
     "test": "vitest",

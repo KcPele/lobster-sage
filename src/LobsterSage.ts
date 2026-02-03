@@ -98,10 +98,10 @@ export class LobsterSage {
         accessSecret: process.env.TWITTER_ACCESS_TOKEN_SECRET!,
       });
     }
-    if (this.config.farcasterEnabled && process.env.FARCASTER_API_KEY) {
+    if (this.config.farcasterEnabled && process.env.NEYNAR_API_KEY) {
       this.farcaster = new FarcasterClient({
-        apiKey: process.env.FARCASTER_API_KEY!,
-        signerUuid: process.env.FARCASTER_SIGNER_UUID!,
+        apiKey: process.env.NEYNAR_API_KEY!,
+        signerUuid: process.env.NEYNAR_SIGNER_UUID!,
         fid: parseInt(process.env.FARCASTER_FID || '0'),
       });
     }

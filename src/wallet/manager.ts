@@ -59,41 +59,14 @@ export class WalletManager {
       transport: http(this.getRpcUrl()),
     });
 
-    // Option 1: Try private key first (simplest and most reliable)
-    const privateKey = config?.privateKey || process.env.PRIVATE_KEY;
-    if (privateKey && privateKey.startsWith('0x') && privateKey.length === 66) {
-      try {
-        console.log('🔑 Initializing with private key...');
-        
-        const account = privateKeyToAccount(privateKey as `0x${string}`);
-        const walletClient = createWalletClient({
-          account,
-          chain,
-          transport: http(this.getRpcUrl()),
-        });
-        
-        // Use type cast to avoid version incompatibility issues
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.walletProvider = new ViemWalletProvider(walletClient as any);
-        this.walletAddress = account.address;
-        this.isInitialized = true;
-        
-        console.log(`✅ WalletManager initialized with private key on ${this.networkId}`);
-        console.log(`📍 Address: ${this.walletAddress}`);
-        return;
-      } catch (error: any) {
-        console.error('Failed to initialize with private key:', error.message);
-      }
-    }
-
-    // Option 2: Try CDP if we have all required credentials
+    // Option 1: Try CDP FIRST (preferred for Base hackathon - Coinbase stack)
     const apiKeyId = config?.apiKeyId || process.env.CDP_API_KEY_ID;
     const apiKeySecret = config?.apiKeyPrivate || process.env.CDP_API_KEY_SECRET;
     const walletSecret = process.env.CDP_WALLET_SECRET;
 
     if (apiKeyId && apiKeySecret && walletSecret) {
       try {
-        console.log('🔑 Attempting CDP initialization with new AgentKit...');
+        console.log('🔷 Attempting CDP initialization (Coinbase Developer Platform)...');
         console.log(`   API Key ID: ${apiKeyId.substring(0, 30)}...`);
         console.log(`   Network: ${this.networkId}`);
 
@@ -113,12 +86,41 @@ export class WalletManager {
         this.walletAddress = await this.walletProvider.getAddress();
         this.isInitialized = true;
         
-        console.log(`✅ WalletManager initialized with CDP on ${this.networkId}`);
+        console.log(`✅ WalletManager initialized with CDP AgentKit on ${this.networkId}`);
         console.log(`📍 Address: ${this.walletAddress}`);
+        console.log(`🔷 Using Coinbase Developer Platform - Full Base stack!`);
         return;
       } catch (error: any) {
         console.error('Failed to initialize with CDP:', error.message);
         if (error.cause) console.error('Cause:', error.cause);
+        console.log('⚠️  Falling back to private key...');
+      }
+    }
+
+    // Option 2: Fallback to private key
+    const privateKey = config?.privateKey || process.env.PRIVATE_KEY;
+    if (privateKey && privateKey.startsWith('0x') && privateKey.length === 66) {
+      try {
+        console.log('🔑 Initializing with private key (fallback)...');
+        
+        const account = privateKeyToAccount(privateKey as `0x${string}`);
+        const walletClient = createWalletClient({
+          account,
+          chain,
+          transport: http(this.getRpcUrl()),
+        });
+        
+        // Use type cast to avoid version incompatibility issues
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.walletProvider = new ViemWalletProvider(walletClient as any);
+        this.walletAddress = account.address;
+        this.isInitialized = true;
+        
+        console.log(`✅ WalletManager initialized with private key on ${this.networkId}`);
+        console.log(`📍 Address: ${this.walletAddress}`);
+        return;
+      } catch (error: any) {
+        console.error('Failed to initialize with private key:', error.message);
       }
     }
 

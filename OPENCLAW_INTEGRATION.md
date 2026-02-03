@@ -1,45 +1,78 @@
 # LobsterSage OpenClaw Integration Guide
 
-This guide explains how to integrate LobsterSage as an OpenClaw skill so it can be used via Telegram, Discord, WhatsApp, or any other OpenClaw-supported channel.
+This guide explains how to integrate LobsterSage as an OpenClaw skill for the **Builder Quest hackathon**.
 
 ## Overview
 
-LobsterSage will be deployed as an **OpenClaw Skill** that provides:
-- Crypto prediction capabilities
-- DeFi yield farming
-- NFT minting for predictions
-- Reputation tracking
-- Real-time market data
+**OpenClaw is the orchestrator** - it handles:
+- User interactions (Telegram, Discord, Farcaster)
+- Scheduling via cron jobs
+- Social posting
+- Decision making
+
+**LobsterSage API just executes** - it handles:
+- Making predictions
+- Minting NFTs onchain (REAL transactions!)
+- Querying portfolio/reputation
+- Interacting with Base blockchain
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         OpenClaw Gateway                                 │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐            │
-│  │ Telegram  │  │  Discord  │  │ Farcaster │  │    X      │            │
-│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘            │
-│        └───────────────┴───────────────┴───────────────┘                │
-│                          │                                               │
-│                  ┌───────▼───────┐                                       │
-│                  │  LobsterSage  │  ← Skill with custom tools           │
-│                  │    Skill      │                                       │
-│                  └───────┬───────┘                                       │
-│                          │                                               │
-│       ┌──────────────────┼──────────────────┐                           │
-│       ▼                  ▼                  ▼                           │
-│  ┌──────────┐    ┌────────────┐    ┌────────────┐                      │
-│  │LobsterSage│   │  exec tool │    │  web_fetch │                      │
-│  │  Server   │   │  (bash)    │    │   tool     │                      │
-│  │ (API)     │   └────────────┘    └────────────┘                      │
-│  └────┬──────┘                                                          │
-│       │                                                                  │
-│       ▼                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    Base Blockchain                               │   │
-│  │  ProphecyNFT: 0xa358df...  │  Reputation: 0x17ccdc...           │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    OpenClaw Gateway (ORCHESTRATOR)                        │
+│                                                                           │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐             │
+│  │ Telegram  │  │  Discord  │  │ Farcaster │  │    X      │             │
+│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘             │
+│        └───────────────┴───────────────┴───────────────┘                 │
+│                          │                                                │
+│                          │ User: "make a prediction"                      │
+│                          │ Cron: "every 6 hours"                          │
+│                          ▼                                                │
+│                  ┌───────────────┐                                        │
+│                  │  LobsterSage  │  ← OpenClaw Skill                      │
+│                  │    Skill      │    (calls HTTP API)                    │
+│                  └───────┬───────┘                                        │
+│                          │                                                │
+│                          │ curl https://lobster.up.railway.app/...        │
+│                          ▼                                                │
+│  ┌───────────────────────────────────────────────────────────────────┐   │
+│  │              LobsterSage API (Railway - EXECUTOR)                  │   │
+│  │                                                                    │   │
+│  │   POST /predict-and-mint  → Mint NFT onchain (0.011 ETH)          │   │
+│  │   GET  /status            → Wallet balance, address                │   │
+│  │   GET  /portfolio         → Holdings, predictions                  │   │
+│  │   GET  /reputation        → Accuracy score                         │   │
+│  └────────────────────────────────┬──────────────────────────────────┘   │
+│                                   │                                       │
+│                                   ▼                                       │
+│  ┌───────────────────────────────────────────────────────────────────┐   │
+│  │                    Base Sepolia Blockchain                         │   │
+│  │                                                                    │   │
+│  │  ProphecyNFT: 0xa358df3fea45be4f23825b8074e156c55a1cfda2          │   │
+│  │  Reputation:  0x17ccdc2dfa3f8297048d16ef069cb3c77030bb32          │   │
+│  │  CDP Wallet:  0xD7476C17Cfd60f67bdB15B235EeD963DaFAB9353          │   │
+│  └───────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+## Live Deployment
+
+**LobsterSage API:** https://lobster.up.railway.app
+
+Test it now:
+```bash
+# Health check
+curl https://lobster.up.railway.app/health
+
+# Get status (wallet info)
+curl https://lobster.up.railway.app/status
+
+# Make prediction + mint NFT (REAL TX!)
+curl -X POST https://lobster.up.railway.app/predict-and-mint \
+  -H "Content-Type: application/json" \
+  -d '{"market": "ETH"}'
 ```
 
 ## Option 1: Skill with HTTP API Server (Recommended)

@@ -28,7 +28,6 @@ export class LobsterSage {
   private analytics: BaseAnalytics;
   private yieldOptimizer: YieldOptimizer;
   private twitter: TwitterClient | null = null;
-  // @ts-expect-error Farcaster integration pending
   private farcaster: FarcasterClient | null = null;
   // @ts-expect-error Aave integration for yield cycles
   private aave!: AaveV3;
@@ -176,7 +175,7 @@ export class LobsterSage {
   /**
    * Run a prediction cycle
    */
-  private async runPredictionCycle(): Promise<void> {
+  private async runPredictionCycle(): Promise<any> {
     console.log('🔮 Running prediction cycle...');
 
     // Scan ecosystem
@@ -210,25 +209,46 @@ export class LobsterSage {
 
     if (!prediction) {
       console.log('No high-confidence predictions this cycle');
-      return;
+      return null;
     }
 
     // Validate prediction
     const isValid = await this.predictor.validatePrediction(prediction);
     if (!isValid) {
       console.log('Prediction did not meet criteria');
-      return;
+      return null;
     }
 
-    // Mint Prophecy NFT
+    // Mint Prophecy NFT - REAL ONCHAIN TRANSACTION
     const nft = await this.prophesier.mintProphecy(prediction);
     console.log(`✅ Minted Prophecy NFT #${nft.tokenId}`);
+    
+    const txHash = nft.txHash || 'simulated';
+    const basescanUrl = nft.txHash 
+      ? `https://sepolia.basescan.org/tx/${nft.txHash}` 
+      : null;
 
-    // Stake on prediction (trade)
-    const trade = await this.prophesier.stakeOnPrediction(prediction);
-    console.log(`💰 Staked on prediction: ${trade.hash}`);
+    // Post to Farcaster if configured
+    if (this.farcaster) {
+      try {
+        const castContent = `🔮 New Prophecy from LobsterSage!
 
-    // Post to social if configured
+${prediction.direction.toUpperCase()}: ${prediction.market} → $${prediction.targetPrice}
+Confidence: ${prediction.confidence}%
+Timeframe: ${prediction.timeframe}
+
+${basescanUrl ? `🔗 TX: ${basescanUrl}` : ''}
+
+Built on @base with @coinbase AgentKit 🦞`;
+
+        const cast = await this.farcaster.postCast({ text: castContent });
+        console.log(`📢 Posted to Farcaster: ${cast.hash}`);
+      } catch (error: any) {
+        console.error('Failed to post to Farcaster:', error.message);
+      }
+    }
+
+    // Post to Twitter if configured
     if (this.twitter) {
       const content = contentGenerator.predictionAnnouncement({
         id: nft.tokenId,
@@ -238,11 +258,12 @@ export class LobsterSage {
         timeframe: prediction.timeframe,
         reasoning: prediction.reasoning,
         timestamp: new Date()
-      }, trade.hash);
+      }, txHash);
       console.log('Would post to Twitter:', content);
     }
 
     console.log('✅ Prediction cycle complete');
+    return { prediction, nft, txHash, basescanUrl };
   }
 
   /**
@@ -359,6 +380,14 @@ export class LobsterSage {
   async mintPredictionAsNFT(prediction: Prediction): Promise<any> {
     console.log(`🔮 Minting prediction as Prophecy NFT...`);
     return this.prophesier.mintProphecy(prediction);
+  }
+
+  /**
+   * Run a single prediction cycle (for testing/demo)
+   * This is the same as what autonomous mode does, but on-demand
+   */
+  async runSinglePredictionCycle(): Promise<any> {
+    return this.runPredictionCycle();
   }
 
   /**

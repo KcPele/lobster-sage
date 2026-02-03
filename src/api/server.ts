@@ -172,35 +172,8 @@ app.get('/reputation', requireSage, async (_req: Request, res: Response) => {
   }
 });
 
-// ============ Autonomous Mode ============
-
-app.post('/autonomous/start', requireSage, async (_req: Request, res: Response) => {
-  try {
-    await sage!.startAutonomousMode({
-      predictionInterval: 6 * 60 * 60 * 1000,
-      yieldCheckInterval: 60 * 60 * 1000,
-      socialInterval: 4 * 60 * 60 * 1000
-    });
-    res.json({ 
-      status: 'started',
-      message: 'LobsterSage autonomous mode activated'
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/autonomous/stop', requireSage, async (_req: Request, res: Response) => {
-  try {
-    await sage!.stopAutonomousMode();
-    res.json({ 
-      status: 'stopped',
-      message: 'LobsterSage autonomous mode deactivated'
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// ============ OpenClaw Integration ============
+// These endpoints are called by OpenClaw - it handles scheduling/orchestration
 
 // ============ NFT Operations ============
 
@@ -304,21 +277,20 @@ initSage().then(() => {
    
    URL: http://localhost:${PORT}
    
-   Endpoints:
-   GET  /health          - Health check
-   GET  /status          - Agent status
-   GET  /portfolio       - Portfolio summary
-   POST /predict         - Make prediction
-   GET  /predictions     - Active predictions
-   GET  /analysis        - Market analysis
-   GET  /trends          - Ecosystem trends
-   GET  /yields          - Yield opportunities
-   POST /yields/optimize - Optimize yields
-   GET  /reputation      - Reputation score
-   POST /autonomous/start - Start autonomous mode
-   POST /autonomous/stop  - Stop autonomous mode
+   Core Endpoints (for OpenClaw):
+   GET  /health           - Health check
+   GET  /status           - Agent status & wallet info
+   POST /predict-and-mint - Make prediction + mint NFT (REAL TX!)
+   GET  /portfolio        - Portfolio summary
+   GET  /reputation       - Reputation score
    
-   Ready for OpenClaw integration!
+   Analysis Endpoints:
+   POST /predict          - Make prediction only
+   GET  /analysis         - Market analysis
+   GET  /trends           - Ecosystem trends
+   GET  /yields           - Yield opportunities
+   
+   OpenClaw orchestrates scheduling - this API just executes!
 ═══════════════════════════════════════════════════════ 🦞
     `);
   });

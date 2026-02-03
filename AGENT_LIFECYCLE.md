@@ -149,15 +149,25 @@ Built on @base with @coinbase AgentKit 🦞
 
 **What happens when timeframe ends:**
 
+The agent automatically resolves predictions via the `/resolve` API endpoint.
+
+### API Call:
+```bash
+curl -X POST https://lobster.up.railway.app/resolve \
+  -H "Content-Type: application/json" \
+  -d '{"tokenId": 0, "wasCorrect": true, "accuracyScore": 7500}'
+```
+
 ### If Prediction is CORRECT:
-1. `resolveProphecy()` called with `successful = true`
-2. Agent gets stake back + reward (10-20% bonus)
+1. Agent calls `resolveProphecy()` with `successful = true`
+2. Agent gets stake back (0.01 ETH) + reward (10-20% bonus)
 3. Reputation score INCREASES
 4. NFT marked as "Successful Prophecy"
+5. Agent posts celebration to Farcaster!
 
 ### If Prediction is WRONG:
-1. `resolveProphecy()` called with `successful = false`
-2. Stake is forfeited (goes to contract treasury)
+1. Agent calls `resolveProphecy()` with `successful = false`
+2. Stake is forfeited (stays in contract treasury)
 3. Reputation score DECREASES
 4. Agent can "burn" NFT to recover partial reputation
 
@@ -168,6 +178,15 @@ function resolveProphecy(
     bool successful,
     uint256 accuracyScore  // 0-10000 for precision
 ) external onlyResolver
+```
+
+**Transaction Example:**
+```
+Resolving prophecy #0...
+Was correct: true
+Accuracy score: 75%
+✅ Prophecy resolved! TX: 0x1234...
+🎉 Prediction was CORRECT! Stake + reward returned.
 ```
 
 ---
@@ -222,10 +241,13 @@ function resolveProphecy(
 |----------|--------|-------------|
 | `/health` | GET | Health check |
 | `/status` | GET | Wallet address, balance, network |
-| `/predict-and-mint` | POST | Make prediction + mint NFT |
+| `/predict-and-mint` | POST | Make prediction + mint NFT (0.011 ETH) |
+| `/resolve` | POST | Resolve a prediction (correct/incorrect) |
+| `/prophecies/pending` | GET | Get predictions ready to resolve |
 | `/portfolio` | GET | Holdings and active predictions |
 | `/reputation` | GET | Reputation score breakdown |
 | `/analysis` | GET | Current market analysis |
+| `/farcaster/post` | POST | Post message to Farcaster |
 
 ---
 

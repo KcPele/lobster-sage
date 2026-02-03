@@ -1,4 +1,4 @@
-import { type Address, parseEther, formatEther, isAddress } from 'viem';
+import { type Address, formatEther, isAddress } from 'viem';
 import type { WalletClient, PublicClient, Account, Chain, Transport } from 'viem';
 
 export interface WalletManagerConfig {

@@ -1,4 +1,3 @@
-import { ethers } from 'ethers';
 import { WalletManager } from '../wallet/manager';
 
 export interface YieldOpportunity {
@@ -57,7 +56,7 @@ export class YieldOptimizer {
   /**
    * Initialize with wallet
    */
-  async initialize(wallet: WalletManager): Promise<void> {
+  async initialize(_wallet: WalletManager): Promise<void> {
     console.log('🚜 Initializing Yield Optimizer...');
     // Load existing positions if any
     await this.loadPositions();
@@ -202,6 +201,35 @@ export class YieldOptimizer {
    */
   async getPositions(): Promise<YieldPosition[]> {
     return this.positions;
+  }
+
+  /**
+   * Get yield opportunities (alias for scanOpportunities)
+   */
+  async getOpportunities(): Promise<YieldOpportunity[]> {
+    return this.scanOpportunities();
+  }
+
+  /**
+   * Optimize positions by rebalancing to better opportunities
+   */
+  async optimizePositions(): Promise<{ rebalanced: boolean; reason: string; improvement?: number }> {
+    const opportunities = await this.scanOpportunities();
+    const recommendation = await this.calculateOptimalAllocation(opportunities);
+    
+    if (await this.shouldRebalance(recommendation)) {
+      await this.rebalance(recommendation);
+      return {
+        rebalanced: true,
+        reason: recommendation.reason,
+        improvement: recommendation.expectedImprovement
+      };
+    }
+    
+    return {
+      rebalanced: false,
+      reason: 'No rebalancing needed at this time'
+    };
   }
 
   /**

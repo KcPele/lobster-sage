@@ -159,7 +159,7 @@ Trading with wisdom 🦞🔮`;
    * Generate engagement response
    */
   engagementResponse(
-    originalText: string,
+    _originalText: string,
     sentiment: 'positive' | 'neutral' | 'negative' | 'question'
   ): string {
     const responses: Record<string, string[]> = {

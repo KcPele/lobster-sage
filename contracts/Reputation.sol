@@ -398,7 +398,7 @@ contract Reputation is Ownable, Pausable {
         return 0;
     }
     
-    function _updateTotalScore(ReputationData storage rep) internal pure {
+    function _updateTotalScore(ReputationData storage rep) internal {
         rep.totalScore = rep.accuracyPoints + rep.volumePoints + rep.consistencyPoints + rep.yieldPoints;
     }
     

@@ -1,4 +1,4 @@
-import { WalletManager } from '../wallet/manager.js';
+// Utils module exports
 
 // Common token addresses on Base
 export const TOKENS = {

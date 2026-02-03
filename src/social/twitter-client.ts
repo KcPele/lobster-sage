@@ -68,10 +68,6 @@ export class TwitterClient {
   private getAuthHeaders(): Record<string, string> {
     // In production, use OAuth 2.0 or OAuth 1.0a properly
     // This is a simplified version - use twitter-api-v2 SDK in production
-    const credentials = Buffer.from(
-      `${this.config.appKey}:${this.config.appSecret}`
-    ).toString('base64');
-
     return {
       Authorization: `Bearer ${this.config.accessToken}`,
       'Content-Type': 'application/json',

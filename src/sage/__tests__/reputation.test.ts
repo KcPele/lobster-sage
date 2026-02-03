@@ -18,7 +18,6 @@ import {
 
 const MOCK_CONTRACT_ADDRESS = '0x1234567890123456789012345678901234567890';
 const MOCK_USER_ADDRESS = '0xabcdef1234567890abcdef1234567890abcdef12';
-const MOCK_RECORDER_ADDRESS = '0x1111111111111111111111111111111111111111';
 
 // Mock ethers Contract
 const createMockContract = (overrides: Partial<any> = {}) => ({

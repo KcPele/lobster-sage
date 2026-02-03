@@ -7,9 +7,7 @@
 
 import {
   createPublicClient,
-  createWalletClient,
   http,
-  parseUnits,
   formatUnits,
   type Address,
   type Hash,
@@ -208,7 +206,7 @@ export class AaveV3 {
   private chain: Chain;
 
   constructor(
-    private readonly network: 'base' | 'baseSepolia' = 'base',
+    network: 'base' | 'baseSepolia' = 'base',
     walletClient?: WalletClient,
     customRpcUrl?: string
   ) {
@@ -254,26 +252,6 @@ export class AaveV3 {
       );
     }
     return wallet.account.address;
-  }
-
-  /**
-   * Get token decimals
-   */
-  private async getTokenDecimals(tokenAddress: Address): Promise<number> {
-    try {
-      const decimals = await this.publicClient.readContract({
-        address: tokenAddress,
-        abi: ERC20_ABI,
-        functionName: 'decimals',
-      });
-      return decimals;
-    } catch (error) {
-      throw new AaveV3Error(
-        `Failed to get token decimals for ${tokenAddress}`,
-        'DECIMALS_ERROR',
-        error as Error
-      );
-    }
   }
 
   /**

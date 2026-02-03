@@ -1,15 +1,15 @@
-import { WalletManager } from './wallet/manager';
-import { PredictorEngine } from './sage/predictor';
+import { WalletManager, getWalletManager } from './wallet/manager';
+import { PredictorEngine, Prediction } from './sage/predictor';
 import { Prophesier } from './sage/prophesier';
-import { ReputationSystem } from './sage/reputation';
-import { AnalyticsEngine } from './sage/analytics';
+import { OnchainReputationSystem, getReputationSystem } from './sage/reputation';
+import { BaseAnalytics, getAnalytics } from './sage/analytics';
 import { YieldOptimizer } from './yield/optimizer';
-import { TwitterClient } from './social/TwitterClient';
+import { TwitterClient } from './social/twitter-client';
 import { FarcasterClient } from './social/farcaster-client';
-import { SocialPublisher } from './social';
+import { contentGenerator } from './social/content-templates';
 import { AaveV3 } from './defi/AaveV3';
-import { config } from './config';
-import { Prediction, PortfolioSummary, AutonomousConfig } from './types';
+import { getConfig, Config } from './config';
+import { PortfolioSummary, AutonomousConfig } from './types';
 
 /**
  * LobsterSage - Autonomous AI Agent for Base Blockchain
@@ -21,14 +21,18 @@ import { Prediction, PortfolioSummary, AutonomousConfig } from './types';
  * - Social engagement (transparency)
  */
 export class LobsterSage {
-  private wallet: WalletManager;
+  private wallet!: WalletManager;
   private predictor: PredictorEngine;
-  private prophesier: Prophesier;
-  private reputation: ReputationSystem;
-  private analytics: AnalyticsEngine;
+  private prophesier!: Prophesier;
+  private reputation!: OnchainReputationSystem;
+  private analytics: BaseAnalytics;
   private yieldOptimizer: YieldOptimizer;
-  private social: SocialPublisher;
-  private aave: AaveV3;
+  private twitter: TwitterClient | null = null;
+  // @ts-expect-error Farcaster integration pending
+  private farcaster: FarcasterClient | null = null;
+  // @ts-expect-error Aave integration for yield cycles
+  private aave!: AaveV3;
+  private config: Config;
   
   private isRunning: boolean = false;
   private lastPredictionTime: number = 0;
@@ -36,14 +40,25 @@ export class LobsterSage {
   private lastSocialPost: number = 0;
 
   constructor() {
-    this.wallet = new WalletManager(config.wallet);
-    this.predictor = new PredictorEngine(config.sage);
-    this.prophesier = new Prophesier(config.contracts.prophecyNFT, this.wallet);
-    this.reputation = new ReputationSystem(config.contracts.reputation, this.wallet);
-    this.analytics = new AnalyticsEngine();
-    this.yieldOptimizer = new YieldOptimizer(config.yield);
-    this.social = new SocialPublisher(config.social);
-    this.aave = new AaveV3(config.network.rpcUrl, this.wallet);
+    this.config = getConfig();
+    
+    // Initialize predictor with config
+    this.predictor = new PredictorEngine({
+      minConfidence: this.config.minConfidence,
+      maxStakePercent: 20,
+      defaultTimeframe: '7d'
+    });
+    
+    // Initialize analytics
+    this.analytics = getAnalytics();
+    
+    // Initialize yield optimizer
+    this.yieldOptimizer = new YieldOptimizer({
+      minRebalanceThreshold: 2,
+      maxSlippage: 0.5,
+      riskTolerance: 'moderate',
+      rebalanceInterval: this.config.yieldRebalanceInterval * 1000
+    });
   }
 
   /**
@@ -52,14 +67,54 @@ export class LobsterSage {
   async initialize(): Promise<void> {
     console.log('🦞 Initializing LobsterSage...');
     
+    // Initialize wallet with new AgentKit config
+    this.wallet = getWalletManager({
+      apiKeyId: this.config.apiKeyId,
+      apiKeyPrivate: this.config.apiKeyPrivate,
+      networkId: this.config.network
+    });
     await this.wallet.initialize();
+    
+    // Initialize prophesier with contract
+    this.prophesier = new Prophesier(
+      this.config.prophecyNftContract,
+      this.wallet
+    );
+    
+    // Initialize reputation system
+    this.reputation = getReputationSystem(this.config.reputationContract);
     await this.reputation.initialize();
-    await this.social.initialize();
+    
+    // Initialize AaveV3
+    const network = this.config.network === 'base-mainnet' ? 'base' : 'baseSepolia';
+    this.aave = new AaveV3(network);
+    
+    // Initialize social clients if configured
+    if (this.config.twitterEnabled && process.env.TWITTER_API_KEY) {
+      this.twitter = new TwitterClient({
+        appKey: process.env.TWITTER_API_KEY!,
+        appSecret: process.env.TWITTER_API_SECRET!,
+        accessToken: process.env.TWITTER_ACCESS_TOKEN!,
+        accessSecret: process.env.TWITTER_ACCESS_TOKEN_SECRET!,
+      });
+    }
+    if (this.config.farcasterEnabled && process.env.FARCASTER_API_KEY) {
+      this.farcaster = new FarcasterClient({
+        apiKey: process.env.FARCASTER_API_KEY!,
+        signerUuid: process.env.FARCASTER_SIGNER_UUID!,
+        fid: parseInt(process.env.FARCASTER_FID || '0'),
+      });
+    }
+    
+    // Initialize yield optimizer
     await this.yieldOptimizer.initialize(this.wallet);
     
+    const address = await this.wallet.getAddress();
+    const balance = await this.wallet.getBalance();
+    
     console.log('✅ LobsterSage initialized');
-    console.log(`📍 Wallet: ${this.wallet.getAddress()}`);
-    console.log(`💰 Balance: ${await this.wallet.getBalance('ETH')} ETH`);
+    console.log(`📍 Wallet: ${address}`);
+    console.log(`💰 Balance: ${balance} ETH`);
   }
 
   /**
@@ -100,9 +155,6 @@ export class LobsterSage {
           this.lastSocialPost = now;
         }
 
-        // Check mentions/replies
-        await this.checkEngagement();
-
         // Sleep before next check
         await this.sleep(60000); // 1 minute
 
@@ -128,16 +180,33 @@ export class LobsterSage {
     console.log('🔮 Running prediction cycle...');
 
     // Scan ecosystem
-    const marketData = await this.analytics.scanBaseEcosystem();
+    await this.analytics.scanBaseEcosystem();
     const sentiment = await this.analytics.analyzeSentiment();
-    const metrics = await this.analytics.trackOnchainMetrics();
+    const onchainData = await this.analytics.trackOnchainMetrics();
+
+    // Convert to prediction input format
+    const predictionInput = {
+      marketData: {
+        price: 2500, // Would fetch real price
+        volume24h: 1000000,
+        priceChange24h: sentiment.fearGreedIndex > 50 ? 5 : -5,
+        liquidity: 500000000,
+        targetMarket: 'ETH'
+      },
+      sentiment: {
+        score: (sentiment.overall - 50) / 50, // Normalize to -1 to 1
+        volume: sentiment.socialVolume,
+        trending: sentiment.trendingKeywords
+      },
+      metrics: {
+        whaleMovements: onchainData.whales.length,
+        tvlChange: onchainData.tvl.length > 0 ? onchainData.tvl[0].changePercent : 0,
+        activeAddresses: onchainData.metrics.activeAddresses24h
+      }
+    };
 
     // Generate prediction
-    const prediction = await this.predictor.generatePrediction({
-      marketData,
-      sentiment,
-      metrics
-    });
+    const prediction = await this.predictor.generatePrediction(predictionInput);
 
     if (!prediction) {
       console.log('No high-confidence predictions this cycle');
@@ -159,15 +228,19 @@ export class LobsterSage {
     const trade = await this.prophesier.stakeOnPrediction(prediction);
     console.log(`💰 Staked on prediction: ${trade.hash}`);
 
-    // Post to social
-    await this.social.postPrediction({
-      ...prediction,
-      nftId: nft.tokenId,
-      txHash: trade.hash
-    });
-
-    // Update reputation volume
-    await this.reputation.updateVolume(prediction.stakeAmount);
+    // Post to social if configured
+    if (this.twitter) {
+      const content = contentGenerator.predictionAnnouncement({
+        id: nft.tokenId,
+        asset: prediction.market.replace('/', ''),
+        direction: prediction.direction as 'bullish' | 'bearish' | 'neutral',
+        confidence: prediction.confidence / 100,
+        timeframe: prediction.timeframe,
+        reasoning: prediction.reasoning,
+        timestamp: new Date()
+      }, trade.hash);
+      console.log('Would post to Twitter:', content);
+    }
 
     console.log('✅ Prediction cycle complete');
   }
@@ -201,13 +274,6 @@ export class LobsterSage {
     const rebalanceTx = await this.yieldOptimizer.rebalance(allocation);
     console.log(`✅ Rebalanced: ${rebalanceTx.hash}`);
 
-    // Post yield update
-    await this.social.postYieldUpdate({
-      protocol: allocation.bestProtocol,
-      apy: allocation.bestApy,
-      change: allocation.improvement
-    });
-
     console.log('✅ Yield cycle complete');
   }
 
@@ -220,74 +286,33 @@ export class LobsterSage {
     // Get portfolio summary
     const portfolio = await this.getPortfolioSummary();
     
-    // Post daily summary
-    await this.social.postDailySummary(portfolio);
+    // Generate content
+    const content = contentGenerator.dailySummary({
+      totalValue: portfolio.totalValue,
+      dayChange: portfolio.totalValueChange24h || 0,
+      dayChangePercent: portfolio.totalValue > 0 ? (portfolio.totalValueChange24h / portfolio.totalValue) * 100 : 0,
+      activePositions: portfolio.activePredictions,
+      bestPerformer: { asset: 'ETH', change: 0 },
+      worstPerformer: { asset: 'ETH', change: 0 },
+      timestamp: new Date()
+    });
 
-    // Update reputation consistency
-    await this.reputation.updateConsistency();
+    console.log('Daily Summary:', content);
 
     console.log('✅ Social cycle complete');
-  }
-
-  /**
-   * Check for mentions and replies
-   */
-  private async checkEngagement(): Promise<void> {
-    // Check X mentions
-    const xMentions = await this.social.getXMentions();
-    for (const mention of xMentions) {
-      await this.handleMention(mention, 'twitter');
-    }
-
-    // Check Farcaster notifications
-    const farcasterNotifications = await this.social.getFarcasterNotifications();
-    for (const notification of farcasterNotifications) {
-      await this.handleMention(notification, 'farcaster');
-    }
-  }
-
-  /**
-   * Handle a mention/reply
-   */
-  private async handleMention(mention: any, platform: 'twitter' | 'farcaster'): Promise<void> {
-    // Generate response based on mention content
-    const response = await this.generateResponse(mention.text);
-    
-    if (platform === 'twitter') {
-      await this.social.replyToX(mention.id, response);
-    } else {
-      await this.social.replyToFarcaster(mention.id, response);
-    }
-  }
-
-  /**
-   * Generate a response to a mention
-   */
-  private async generateResponse(mentionText: string): Promise<string> {
-    // Simple response generation
-    if (mentionText.toLowerCase().includes('prediction')) {
-      const portfolio = await this.getPortfolioSummary();
-      return `I currently have ${portfolio.activePredictions} active predictions. Check my profile for the latest! 🦞`;
-    }
-    
-    if (mentionText.toLowerCase().includes('yield') || mentionText.toLowerCase().includes('apy')) {
-      return `My current blended APY is optimized across Aave, Uniswap, and Aerodrome. DM me for details! 💰`;
-    }
-
-    return `Thanks for reaching out! I'm an autonomous AI agent building reputation through predictions on Base. Follow along! 🦞`;
   }
 
   /**
    * Get portfolio summary
    */
   async getPortfolioSummary(): Promise<PortfolioSummary> {
-    const ethBalance = await this.wallet.getBalance('ETH');
-    const usdcBalance = await this.wallet.getBalance('USDC');
+    const ethBalance = parseFloat(await this.wallet.getBalance());
     
-    const totalValue = ethBalance * 2500 + usdcBalance; // Approximate ETH price
+    const totalValue = ethBalance * 2500; // Approximate ETH price
     
     const activePredictions = await this.prophesier.getActivePredictionsCount();
-    const reputationScore = await this.reputation.getScore();
+    const reputationData = await this.reputation.getReputation(await this.wallet.getAddress());
+    const reputationScore = reputationData ? reputationData.totalScore / 100 : 0;
     const yieldPositions = await this.yieldOptimizer.getPositions();
 
     return {
@@ -303,15 +328,28 @@ export class LobsterSage {
   /**
    * Make a manual prediction
    */
-  async makePrediction(market: string, timeframe: string): Promise<Prediction | null> {
-    const marketData = await this.analytics.scanBaseEcosystem();
+  async makePrediction(market: string, _timeframe: string): Promise<Prediction | null> {
+    await this.analytics.scanBaseEcosystem();
     const sentiment = await this.analytics.analyzeSentiment();
     
     return this.predictor.generatePrediction({
-      marketData: { ...marketData, targetMarket: market },
-      sentiment,
-      metrics: {},
-      timeframe
+      marketData: {
+        price: 2500,
+        volume24h: 1000000,
+        priceChange24h: 5,
+        liquidity: 500000000,
+        targetMarket: market
+      },
+      sentiment: {
+        score: (sentiment.overall - 50) / 50,
+        volume: sentiment.socialVolume,
+        trending: sentiment.trendingKeywords
+      },
+      metrics: {
+        whaleMovements: 0,
+        tvlChange: 0,
+        activeAddresses: 0
+      }
     });
   }
 
@@ -319,7 +357,8 @@ export class LobsterSage {
    * Get current reputation
    */
   async getReputation(): Promise<any> {
-    return this.reputation.getFullStats();
+    const address = await this.wallet.getAddress();
+    return this.reputation.getReputation(address);
   }
 
   /**
@@ -337,6 +376,74 @@ export class LobsterSage {
     await this.prophesier.emergencyExit();
     
     console.log('✅ Emergency exit complete');
+  }
+
+  /**
+   * Get wallet address
+   */
+  async getWalletAddress(): Promise<string> {
+    return this.wallet.getAddress();
+  }
+
+  /**
+   * Get wallet balance
+   */
+  async getBalance(): Promise<string> {
+    return this.wallet.getBalance();
+  }
+
+  /**
+   * Get active predictions
+   */
+  async getActivePredictions(): Promise<any[]> {
+    const count = await this.prophesier.getActivePredictionsCount();
+    return Array(count).fill({ status: 'active' });
+  }
+
+  /**
+   * Get market analysis
+   */
+  async getMarketAnalysis(): Promise<any> {
+    const insights = await this.analytics.generateInsights();
+    const sentiment = await this.analytics.analyzeSentiment();
+    
+    return {
+      timestamp: Date.now(),
+      sentiment,
+      insights: insights.slice(0, 5),
+      summary: insights.length > 0 
+        ? `${insights.length} market insights detected`
+        : 'Markets are calm'
+    };
+  }
+
+  /**
+   * Get ecosystem trends
+   */
+  async getEcosystemTrends(): Promise<any[]> {
+    const trends = await this.analytics.scanBaseEcosystem();
+    return trends;
+  }
+
+  /**
+   * Get yield opportunities
+   */
+  async getYieldOpportunities(): Promise<any[]> {
+    return this.yieldOptimizer.getOpportunities();
+  }
+
+  /**
+   * Optimize yields
+   */
+  async optimizeYields(): Promise<any> {
+    return this.yieldOptimizer.optimizePositions();
+  }
+
+  /**
+   * Get yield positions
+   */
+  async getYieldPositions(): Promise<any[]> {
+    return this.yieldOptimizer.getPositions();
   }
 
   /**

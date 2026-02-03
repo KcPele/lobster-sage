@@ -63,11 +63,6 @@ interface NeynarNotificationsResponse {
   }[];
 }
 
-interface NeynarError {
-  message: string;
-  code: string;
-}
-
 interface RateLimitInfo {
   limit: number;
   remaining: number;

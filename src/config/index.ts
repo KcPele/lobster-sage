@@ -8,9 +8,9 @@ const ConfigSchema = z.object({
   // Network
   network: z.enum(['base-sepolia', 'base-mainnet']).default('base-sepolia'),
   
-  // CDP SDK
-  cdpApiKeyName: z.string().optional(),
-  cdpApiKeyPrivateKey: z.string().optional(),
+  // CDP SDK (new AgentKit v0.10+ uses apiKeyId/apiKeyPrivate)
+  apiKeyId: z.string().optional(),
+  apiKeyPrivate: z.string().optional(),
   cdpWalletSecret: z.string().optional(),
   
   // RPC URLs
@@ -45,8 +45,9 @@ export type Config = z.infer<typeof ConfigSchema>;
 export function loadConfig(): Config {
   const config = ConfigSchema.parse({
     network: process.env.NETWORK_ID,
-    cdpApiKeyName: process.env.CDP_API_KEY_NAME,
-    cdpApiKeyPrivateKey: process.env.CDP_API_KEY_PRIVATE_KEY,
+    // Support both new (CDP_API_KEY_ID) and legacy (CDP_API_KEY_NAME) variable names
+    apiKeyId: process.env.CDP_API_KEY_ID || process.env.CDP_API_KEY_NAME,
+    apiKeyPrivate: process.env.CDP_API_KEY_SECRET || process.env.CDP_API_KEY_PRIVATE_KEY,
     cdpWalletSecret: process.env.CDP_WALLET_SECRET,
     baseSepoliaRpc: process.env.BASE_SEPOLIA_RPC,
     baseMainnetRpc: process.env.BASE_MAINNET_RPC,

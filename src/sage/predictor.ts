@@ -1,5 +1,4 @@
-import { ethers } from 'ethers';
-import { WalletManager } from '../wallet/manager';
+// Prediction Engine for LobsterSage
 
 export interface MarketData {
   price: number;
@@ -185,7 +184,7 @@ export class PredictorEngine {
    * Generate reasoning for prediction
    */
   private generateReasoning(
-    direction: string, 
+    _direction: string, 
     trendStrength: number, 
     sentiment: number,
     whaleActivity: number

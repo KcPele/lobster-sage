@@ -1,4 +1,4 @@
-import { formatEther, parseEther } from 'viem';
+import { formatEther } from 'viem';
 
 export interface FormatOptions {
   decimals?: number;

@@ -3,11 +3,17 @@
  * 
  * Monitors Base ecosystem for trends, launches, and events
  * Provides sentiment analysis and onchain metrics tracking
+ * 
+ * Uses REAL data from:
+ * - DefiLlama: TVL, protocol data, yields
+ * - CoinGecko: Token prices, market data, fear/greed approximation
  */
 
 import { getConfig, getRpcUrl } from '../config/index.js';
 import { createPublicClient, http } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
+import { getDefiLlama } from '../data/defillama';
+import { getCoinGecko } from '../data/coingecko';
 
 // ============ Types ============
 
@@ -235,7 +241,7 @@ export class BaseAnalytics {
     const insights: MarketInsight[] = [];
 
     // Get fresh data
-    const [trends, sentiment, { whales, volume, tvl }] = await Promise.all([
+    const [trends, sentiment, { whales, tvl }] = await Promise.all([
       this.scanBaseEcosystem(),
       this.analyzeSentiment(),
       this.trackOnchainMetrics(),
@@ -374,25 +380,35 @@ export class BaseAnalytics {
   }
 
   private async checkTVLGrowth(timestamp: number): Promise<EcosystemTrend[]> {
-    // Query protocols for TVL changes
     const trends: EcosystemTrend[] = [];
     
-    for (const protocol of ANALYTICS_CONFIG.PROTOCOLS.slice(0, 5)) {
-      // Simulate TVL check - in production, query DefiLlama API or onchain
-      const mockChange = Math.random() * 30 - 10; // -10% to +20%
+    try {
+      // Use REAL data from DefiLlama
+      const defiLlama = getDefiLlama();
+      const tvlChanges = await defiLlama.getBaseTVLChanges();
       
-      if (Math.abs(mockChange) > ANALYTICS_CONFIG.TVL_CHANGE_THRESHOLD * 100) {
-        trends.push({
-          id: `tvl-${protocol}-${timestamp}`,
-          category: 'tvl_growth',
-          protocol,
-          description: `${protocol} TVL ${mockChange > 0 ? 'surged' : 'dropped'} ${Math.abs(mockChange).toFixed(1)}%`,
-          severity: Math.abs(mockChange) > 30 ? 'high' : 'medium',
-          timestamp,
-          metrics: { changePercent: mockChange },
-          relatedAssets: [protocol.toUpperCase()],
-        });
+      for (const protocol of tvlChanges) {
+        const change24h = protocol.change24h;
+        
+        if (Math.abs(change24h) > ANALYTICS_CONFIG.TVL_CHANGE_THRESHOLD * 100) {
+          trends.push({
+            id: `tvl-${protocol.protocol}-${timestamp}`,
+            category: 'tvl_growth',
+            protocol: protocol.protocol,
+            description: `${protocol.protocol} TVL ${change24h > 0 ? 'surged' : 'dropped'} ${Math.abs(change24h).toFixed(1)}% ($${(protocol.tvl / 1e6).toFixed(2)}M)`,
+            severity: Math.abs(change24h) > 30 ? 'high' : Math.abs(change24h) > 15 ? 'medium' : 'low',
+            timestamp,
+            metrics: { 
+              changePercent: change24h,
+              tvl: protocol.tvl,
+              change7d: protocol.change7d,
+            },
+            relatedAssets: [protocol.protocol.toUpperCase()],
+          });
+        }
       }
+    } catch (error) {
+      console.error('Failed to fetch TVL data from DefiLlama:', error);
     }
     
     return trends;
@@ -401,21 +417,34 @@ export class BaseAnalytics {
   private async checkVolumeSpikes(timestamp: number): Promise<EcosystemTrend[]> {
     const trends: EcosystemTrend[] = [];
     
-    for (const asset of ANALYTICS_CONFIG.ASSETS.slice(0, 3)) {
-      const mockSpike = Math.random() * 5; // 0x to 5x normal
+    try {
+      // Use REAL data from CoinGecko
+      const coinGecko = getCoinGecko();
+      const marketData = await coinGecko.getBaseTokenMarketData();
       
-      if (mockSpike > ANALYTICS_CONFIG.VOLUME_SPIKE_THRESHOLD) {
-        trends.push({
-          id: `volume-${asset}-${timestamp}`,
-          category: 'volume_spike',
-          protocol: 'multiple',
-          description: `${asset} trading volume spiked ${mockSpike.toFixed(1)}x above average`,
-          severity: mockSpike > 4 ? 'high' : 'medium',
-          timestamp: Date.now(),
-          metrics: { spikeMultiplier: mockSpike },
-          relatedAssets: [asset],
-        });
+      for (const token of marketData) {
+        // Check for significant 24h price changes (proxy for volume activity)
+        const priceChange = Math.abs(token.price_change_percentage_24h || 0);
+        
+        if (priceChange > 10) { // 10%+ movement indicates high activity
+          trends.push({
+            id: `volume-${token.symbol}-${timestamp}`,
+            category: 'volume_spike',
+            protocol: 'multiple',
+            description: `${token.symbol.toUpperCase()} saw ${priceChange.toFixed(1)}% price movement with $${(token.total_volume / 1e6).toFixed(2)}M volume`,
+            severity: priceChange > 20 ? 'high' : 'medium',
+            timestamp,
+            metrics: { 
+              priceChange: token.price_change_percentage_24h || 0,
+              volume24h: token.total_volume,
+              currentPrice: token.current_price,
+            },
+            relatedAssets: [token.symbol.toUpperCase()],
+          });
+        }
       }
+    } catch (error) {
+      console.error('Failed to fetch volume data from CoinGecko:', error);
     }
     
     return trends;
@@ -450,15 +479,23 @@ export class BaseAnalytics {
   private async trackVolumeMetrics(): Promise<VolumeMetrics[]> {
     const metrics: VolumeMetrics[] = [];
     
-    for (const asset of ANALYTICS_CONFIG.ASSETS.slice(0, 5)) {
-      metrics.push({
-        asset,
-        volume24h: Math.random() * 1000000000,
-        volumeChange24h: Math.random() * 100 - 30,
-        avgTradeSize: Math.random() * 50000,
-        largeTxCount: Math.floor(Math.random() * 100),
-        timestamp: Date.now(),
-      });
+    try {
+      // Use REAL data from CoinGecko
+      const coinGecko = getCoinGecko();
+      const marketData = await coinGecko.getBaseTokenMarketData();
+      
+      for (const token of marketData.slice(0, 7)) {
+        metrics.push({
+          asset: token.symbol.toUpperCase(),
+          volume24h: token.total_volume,
+          volumeChange24h: token.price_change_percentage_24h || 0,
+          avgTradeSize: token.total_volume / 10000, // Approximate
+          largeTxCount: Math.floor(token.total_volume / 100000), // Approximate
+          timestamp: Date.now(),
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch volume metrics from CoinGecko:', error);
     }
     
     return metrics;
@@ -467,20 +504,28 @@ export class BaseAnalytics {
   private async trackTVLChanges(): Promise<TVLChange[]> {
     const changes: TVLChange[] = [];
     
-    for (const protocol of ANALYTICS_CONFIG.PROTOCOLS.slice(0, 5)) {
-      const prevTvl = 100000000 + Math.random() * 900000000;
-      const changePct = Math.random() * 20 - 5;
-      const currentTvl = prevTvl * (1 + changePct / 100);
+    try {
+      // Use REAL data from DefiLlama
+      const defiLlama = getDefiLlama();
+      const tvlData = await defiLlama.getBaseTVLChanges();
       
-      changes.push({
-        protocol,
-        chain: 'base',
-        previousTvl: prevTvl,
-        currentTvl,
-        change24h: currentTvl - prevTvl,
-        changePercent: changePct,
-        timestamp: Date.now(),
-      });
+      for (const protocol of tvlData) {
+        const changePct = protocol.change24h;
+        const currentTvl = protocol.tvl;
+        const previousTvl = currentTvl / (1 + changePct / 100);
+        
+        changes.push({
+          protocol: protocol.protocol,
+          chain: 'base',
+          previousTvl,
+          currentTvl,
+          change24h: currentTvl - previousTvl,
+          changePercent: changePct,
+          timestamp: Date.now(),
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch TVL changes from DefiLlama:', error);
     }
     
     return changes;
@@ -514,8 +559,20 @@ export class BaseAnalytics {
   }
 
   private async fetchOverallSentiment(): Promise<number> {
-    // In production, aggregate from multiple sources
-    return Math.floor(Math.random() * 200) - 100; // -100 to 100
+    try {
+      // Use CoinGecko global market data for sentiment approximation
+      const coinGecko = getCoinGecko();
+      const globalData = await coinGecko.getGlobalData();
+      
+      // Map market cap change to sentiment score
+      // -5% = -100, +5% = +100
+      const change = globalData.market_cap_change_percentage_24h_usd;
+      const sentiment = Math.max(-100, Math.min(100, change * 20));
+      return Math.round(sentiment);
+    } catch (error) {
+      console.error('Failed to fetch overall sentiment:', error);
+      return 0; // Neutral on error
+    }
   }
 
   private async fetchTwitterSentiment(): Promise<number> {
@@ -531,7 +588,14 @@ export class BaseAnalytics {
   }
 
   private async fetchFearGreedIndex(): Promise<number> {
-    return Math.floor(Math.random() * 100);
+    try {
+      // Use CoinGecko market data to approximate fear/greed
+      const coinGecko = getCoinGecko();
+      return await coinGecko.getFearGreedApproximation();
+    } catch (error) {
+      console.error('Failed to fetch fear/greed index:', error);
+      return 50; // Neutral on error
+    }
   }
 
   private async fetchSocialVolume(): Promise<number> {
@@ -539,8 +603,18 @@ export class BaseAnalytics {
   }
 
   private async fetchTrendingKeywords(): Promise<string[]> {
-    const keywords = ['Base', 'L2', 'DeFi', 'Airdrop', 'ETH', 'Aerodrome', 'USDC'];
-    return keywords.slice(0, Math.floor(Math.random() * keywords.length) + 1);
+    try {
+      // Get trending coins from CoinGecko
+      const coinGecko = getCoinGecko();
+      const trending = await coinGecko.getTrending();
+      const trendingNames = trending.slice(0, 5).map(t => t.symbol.toUpperCase());
+      
+      // Add Base ecosystem keywords
+      return ['Base', ...trendingNames, 'L2', 'DeFi'];
+    } catch (error) {
+      console.error('Failed to fetch trending keywords:', error);
+      return ['Base', 'L2', 'DeFi', 'ETH', 'USDC'];
+    }
   }
 
   private async fetchInfluencerSentiment(): Promise<number> {

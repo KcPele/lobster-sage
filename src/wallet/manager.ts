@@ -1,17 +1,16 @@
-import {
-  CdpWalletProvider,
-  EvmWalletProvider,
-} from '@coinbase/cdp-agentkit-core';
+import { CdpEvmWalletProvider, ViemWalletProvider } from '@coinbase/agentkit';
 import { ethers } from 'ethers';
-import { createWalletClient, http, publicActions, WalletClient } from 'viem';
+import { createPublicClient, createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia, base } from 'viem/chains';
 
 export interface WalletConfig {
-  cdpApiKeyName?: string;
-  cdpApiKeyPrivateKey?: string;
+  apiKeyId?: string;
+  apiKeyPrivate?: string;
   networkId?: string;
   walletData?: string;
+  walletAddress?: string;
+  privateKey?: string;
 }
 
 export interface TransactionResult {
@@ -33,240 +32,181 @@ export interface TokenBalance {
 /**
  * Wallet Manager for LobsterSage
  * Handles wallet creation, transaction signing, and balance tracking
- * using Coinbase CDP SDK
+ * using Coinbase AgentKit CDP Wallet Provider or Viem with private key
  */
 export class WalletManager {
-  private provider: CdpWalletProvider | null = null;
-  private viemClient: WalletClient | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private walletProvider: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private publicClient: any = null;
   private networkId: string;
   private isInitialized = false;
+  private walletAddress: string = '';
 
   constructor(config?: WalletConfig) {
     this.networkId = config?.networkId || process.env.NETWORK_ID || 'base-sepolia';
   }
 
   /**
-   * Initialize the wallet manager with CDP SDK
+   * Initialize the wallet manager with CDP AgentKit or Private Key
    */
   async initialize(config?: WalletConfig): Promise<void> {
-    try {
-      const apiKeyName = config?.cdpApiKeyName || process.env.CDP_API_KEY_NAME;
-      const apiKeyPrivateKey = config?.cdpApiKeyPrivateKey || process.env.CDP_API_KEY_PRIVATE_KEY;
+    const chain = this.networkId === 'base-mainnet' ? base : baseSepolia;
+    
+    // Initialize public client for reading blockchain data (always needed)
+    this.publicClient = createPublicClient({
+      chain,
+      transport: http(this.getRpcUrl()),
+    });
 
-      if (!apiKeyName || !apiKeyPrivateKey) {
-        throw new Error('CDP API credentials not found. Set CDP_API_KEY_NAME and CDP_API_KEY_PRIVATE_KEY');
+    // Option 1: Try private key first (simplest and most reliable)
+    const privateKey = config?.privateKey || process.env.PRIVATE_KEY;
+    if (privateKey && privateKey.startsWith('0x') && privateKey.length === 66) {
+      try {
+        console.log('🔑 Initializing with private key...');
+        
+        const account = privateKeyToAccount(privateKey as `0x${string}`);
+        const walletClient = createWalletClient({
+          account,
+          chain,
+          transport: http(this.getRpcUrl()),
+        });
+        
+        // Use type cast to avoid version incompatibility issues
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.walletProvider = new ViemWalletProvider(walletClient as any);
+        this.walletAddress = account.address;
+        this.isInitialized = true;
+        
+        console.log(`✅ WalletManager initialized with private key on ${this.networkId}`);
+        console.log(`📍 Address: ${this.walletAddress}`);
+        return;
+      } catch (error: any) {
+        console.error('Failed to initialize with private key:', error.message);
       }
-
-      // Configure CDP Wallet Provider
-      const walletConfig: Record<string, string> = {
-        apiKeyName,
-        apiKeyPrivateKey: apiKeyPrivateKey.replace(/\\n/g, '\n'),
-        networkId: this.networkId,
-      };
-
-      // If we have existing wallet data, use it
-      if (config?.walletData || process.env.CDP_WALLET_DATA) {
-        walletConfig.cdpWalletData = config?.walletData || process.env.CDP_WALLET_DATA;
-      }
-
-      this.provider = await CdpWalletProvider.configureWithWallet(walletConfig);
-
-      // Initialize viem client for direct transactions
-      const account = privateKeyToAccount(this.getPrivateKey() as `0x${string}`);
-      const chain = this.networkId === 'base-mainnet' ? base : baseSepolia;
-      
-      this.viemClient = createWalletClient({
-        account,
-        chain,
-        transport: http(),
-      }).extend(publicActions);
-
-      this.isInitialized = true;
-      console.log(`✅ WalletManager initialized on ${this.networkId}`);
-      console.log(`📍 Address: ${await this.getAddress()}`);
-    } catch (error) {
-      console.error('Failed to initialize WalletManager:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Create a new wallet
-   */
-  async createWallet(): Promise<{ address: string; walletData: string }> {
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
     }
 
-    const address = await this.provider.getAddress();
-    const walletData = await this.exportWallet();
+    // Option 2: Try CDP if we have all required credentials
+    const apiKeyId = config?.apiKeyId || process.env.CDP_API_KEY_ID;
+    const apiKeySecret = config?.apiKeyPrivate || process.env.CDP_API_KEY_SECRET;
+    const walletSecret = process.env.CDP_WALLET_SECRET;
 
-    return { address, walletData };
+    if (apiKeyId && apiKeySecret && walletSecret) {
+      try {
+        console.log('🔑 Attempting CDP initialization with new AgentKit...');
+        console.log(`   API Key ID: ${apiKeyId.substring(0, 30)}...`);
+        console.log(`   Network: ${this.networkId}`);
+
+        // Configure CDP Wallet Provider - SDK reads env vars directly
+        const walletConfig: any = {
+          networkId: this.networkId,
+        };
+
+        // If we have existing wallet address, use it
+        if (config?.walletAddress || process.env.CDP_WALLET_ADDRESS) {
+          walletConfig.address = config?.walletAddress || process.env.CDP_WALLET_ADDRESS;
+          console.log(`   Using existing wallet address: ${walletConfig.address}`);
+        }
+
+        // Initialize CDP EVM Wallet Provider
+        this.walletProvider = await CdpEvmWalletProvider.configureWithWallet(walletConfig);
+        this.walletAddress = await this.walletProvider.getAddress();
+        this.isInitialized = true;
+        
+        console.log(`✅ WalletManager initialized with CDP on ${this.networkId}`);
+        console.log(`📍 Address: ${this.walletAddress}`);
+        return;
+      } catch (error: any) {
+        console.error('Failed to initialize with CDP:', error.message);
+        if (error.cause) console.error('Cause:', error.cause);
+      }
+    }
+
+    // Option 3: Fall back to demo mode
+    console.log('⚠️  No valid wallet credentials found. Running in DEMO mode.');
+    console.log('   Options:');
+    console.log('   1. Set PRIVATE_KEY (0x... format, 66 chars) for direct wallet access');
+    console.log('   2. Set CDP_API_KEY_ID, CDP_API_KEY_SECRET, and CDP_WALLET_SECRET for CDP');
+    
+    this.isInitialized = true;
+    this.walletAddress = '0x0000000000000000000000000000000000000001';
+    console.log(`✅ WalletManager initialized in DEMO mode on ${this.networkId}`);
   }
 
   /**
    * Get wallet address
    */
   async getAddress(): Promise<string> {
-    if (!this.provider) {
+    if (!this.isInitialized) {
       throw new Error('WalletManager not initialized');
     }
-    return await this.provider.getAddress();
+    return this.walletAddress || 'Unknown';
   }
 
   /**
    * Get ETH balance
    */
   async getBalance(): Promise<string> {
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
+    if (!this.publicClient || !this.walletAddress) {
+      return '0';
     }
 
-    const balance = await this.provider.getBalance();
-    return ethers.formatEther(balance);
+    try {
+      const balance = await this.publicClient.getBalance({
+        address: this.walletAddress as `0x${string}`,
+      });
+      return ethers.formatEther(balance);
+    } catch (error) {
+      console.error('Failed to get balance:', error);
+      return '0';
+    }
   }
 
   /**
    * Get token balance
    */
   async getTokenBalance(tokenAddress: string): Promise<string> {
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
+    if (!this.publicClient || !this.walletAddress) {
+      return '0';
     }
 
     try {
       // ERC20 balanceOf ABI
-      const abi = ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'];
-      const provider = new ethers.JsonRpcProvider(this.getRpcUrl());
-      const contract = new ethers.Contract(tokenAddress, abi, provider);
-      
-      const address = await this.getAddress();
-      const balance = await contract.balanceOf(address);
-      const decimals = await contract.decimals();
-      
+      const abi = [
+        {
+          inputs: [{ name: 'account', type: 'address' }],
+          name: 'balanceOf',
+          outputs: [{ name: '', type: 'uint256' }],
+          stateMutability: 'view',
+          type: 'function',
+        },
+        {
+          inputs: [],
+          name: 'decimals',
+          outputs: [{ name: '', type: 'uint8' }],
+          stateMutability: 'view',
+          type: 'function',
+        },
+      ] as const;
+
+      const [balance, decimals] = await Promise.all([
+        this.publicClient.readContract({
+          address: tokenAddress as `0x${string}`,
+          abi,
+          functionName: 'balanceOf',
+          args: [this.walletAddress as `0x${string}`],
+        }),
+        this.publicClient.readContract({
+          address: tokenAddress as `0x${string}`,
+          abi,
+          functionName: 'decimals',
+        }),
+      ]);
+
       return ethers.formatUnits(balance, decimals);
     } catch (error) {
       console.error(`Failed to get token balance for ${tokenAddress}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Send ETH
-   */
-  async send(to: string, amount: string): Promise<TransactionResult> {
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
-    }
-
-    try {
-      const txHash = await this.provider.sendTransaction({
-        to,
-        value: ethers.parseEther(amount).toString(),
-      });
-
-      return {
-        hash: txHash,
-        status: 'pending',
-        explorerUrl: this.getExplorerUrl(txHash),
-      };
-    } catch (error) {
-      console.error('Failed to send transaction:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Send ERC20 tokens
-   */
-  async sendToken(tokenAddress: string, to: string, amount: string, decimals: number = 18): Promise<TransactionResult> {
-    if (!this.provider || !this.viemClient) {
-      throw new Error('WalletManager not initialized');
-    }
-
-    try {
-      const erc20Abi = [
-        {
-          name: 'transfer',
-          type: 'function',
-          stateMutability: 'nonpayable',
-          inputs: [
-            { name: 'to', type: 'address' },
-            { name: 'amount', type: 'uint256' },
-          ],
-          outputs: [{ name: '', type: 'bool' }],
-        },
-      ];
-
-      const parsedAmount = ethers.parseUnits(amount, decimals);
-      
-      const hash = await this.viemClient.writeContract({
-        address: tokenAddress as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [to as `0x${string}`, parsedAmount],
-      });
-
-      return {
-        hash,
-        status: 'pending',
-        explorerUrl: this.getExplorerUrl(hash),
-      };
-    } catch (error) {
-      console.error('Failed to send token:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Sign a message
-   */
-  async signMessage(message: string): Promise<string> {
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
-    }
-
-    return await this.provider.signMessage(message);
-  }
-
-  /**
-   * Sign a typed data (EIP-712)
-   */
-  async signTypedData(domain: any, types: any, value: any): Promise<string> {
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
-    }
-
-    return await this.provider.signTypedData(domain, types, value);
-  }
-
-  /**
-   * Wait for transaction receipt
-   */
-  async waitForTransaction(txHash: string, confirmations: number = 1): Promise<TransactionResult> {
-    const provider = new ethers.JsonRpcProvider(this.getRpcUrl());
-    
-    try {
-      const receipt = await provider.waitForTransaction(txHash, confirmations);
-      
-      if (!receipt) {
-        return {
-          hash: txHash,
-          status: 'pending',
-          explorerUrl: this.getExplorerUrl(txHash),
-        };
-      }
-
-      return {
-        hash: txHash,
-        status: receipt.status === 1 ? 'success' : 'failed',
-        gasUsed: receipt.gasUsed,
-        blockNumber: receipt.blockNumber,
-        explorerUrl: this.getExplorerUrl(txHash),
-      };
-    } catch (error) {
-      console.error('Failed to wait for transaction:', error);
-      throw error;
+      return '0';
     }
   }
 
@@ -274,24 +214,22 @@ export class WalletManager {
    * Export wallet data for backup
    */
   async exportWallet(): Promise<string> {
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
+    if (!this.walletProvider) {
+      throw new Error('WalletManager not initialized with real wallet');
     }
-
-    // This would export wallet data from CDP
-    // For now, return a placeholder - CDP handles wallet persistence
-    return JSON.stringify({
-      networkId: this.networkId,
-      address: await this.getAddress(),
-      exportedAt: new Date().toISOString(),
-    });
+    // exportWallet only exists on CDP provider, not Viem provider
+    if (typeof this.walletProvider.exportWallet === 'function') {
+      const walletData = await this.walletProvider.exportWallet();
+      return JSON.stringify(walletData);
+    }
+    return JSON.stringify({ address: this.walletAddress, type: 'private_key' });
   }
 
   /**
    * Get native token symbol
    */
   getNativeSymbol(): string {
-    return this.networkId === 'base-mainnet' ? 'ETH' : 'ETH';
+    return 'ETH';
   }
 
   /**
@@ -302,39 +240,31 @@ export class WalletManager {
   }
 
   /**
-   * Get the underlying CDP provider
+   * Get the underlying wallet provider
    */
-  getProvider(): CdpWalletProvider | null {
-    return this.provider;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getWalletProvider(): any {
+    return this.walletProvider;
   }
 
   /**
-   * Get viem client for advanced operations
+   * Get public client for reading blockchain data
    */
-  getViemClient(): WalletClient | null {
-    return this.viemClient;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getPublicClient(): any {
+    return this.publicClient;
   }
 
   // ============ Private Helpers ============
 
-  private getPrivateKey(): string {
-    // In production, this should come from secure storage
-    // CDP handles key management internally
-    if (!this.provider) {
-      throw new Error('WalletManager not initialized');
-    }
-    // Return a dummy key - CDP manages the actual key
-    return '0x0000000000000000000000000000000000000000000000000000000000000000';
-  }
-
-  private getRpcUrl(): string {
+  getRpcUrl(): string {
     if (this.networkId === 'base-mainnet') {
       return process.env.BASE_MAINNET_RPC || 'https://mainnet.base.org';
     }
     return process.env.BASE_SEPOLIA_RPC || 'https://sepolia.base.org';
   }
 
-  private getExplorerUrl(txHash: string): string {
+  getExplorerUrl(txHash: string): string {
     if (this.networkId === 'base-mainnet') {
       return `https://basescan.org/tx/${txHash}`;
     }

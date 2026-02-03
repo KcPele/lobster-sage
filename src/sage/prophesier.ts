@@ -1,6 +1,7 @@
-import { ethers } from 'ethers';
 import { WalletManager } from '../wallet/manager';
 import { Prediction } from './predictor';
+import { UniswapV3, BASE_TOKENS, type SwapResult } from '../defi/UniswapV3';
+import { parseUnits } from 'viem';
 
 export interface ProphecyNFT {
   tokenId: string;
@@ -24,16 +25,44 @@ export interface TradeResult {
 
 /**
  * Prophesier - Handles NFT minting and trading based on predictions
+ * 
+ * Supports real trading via Uniswap V3 when enabled
  */
 export class Prophesier {
-  private contractAddress: string;
   private wallet: WalletManager;
   private prophecies: Map<string, ProphecyNFT> = new Map();
   private activePredictions: Set<string> = new Set();
+  private uniswap: UniswapV3 | null = null;
+  private enableRealTrading: boolean = false;
 
-  constructor(contractAddress: string, wallet: WalletManager) {
-    this.contractAddress = contractAddress;
+  constructor(_contractAddress: string, wallet: WalletManager) {
     this.wallet = wallet;
+  }
+
+  /**
+   * Enable real trading via Uniswap V3
+   * @param network 'base' or 'baseSepolia'
+   */
+  enableUniswapTrading(network: 'base' | 'baseSepolia' = 'baseSepolia'): void {
+    this.uniswap = new UniswapV3(network);
+    this.enableRealTrading = true;
+    console.log(`🔄 Real Uniswap trading enabled on ${network}`);
+  }
+
+  /**
+   * Disable real trading (use simulated)
+   */
+  disableRealTrading(): void {
+    this.uniswap = null;
+    this.enableRealTrading = false;
+    console.log('⏸️ Real trading disabled, using simulated trades');
+  }
+
+  /**
+   * Check if real trading is enabled
+   */
+  isRealTradingEnabled(): boolean {
+    return this.enableRealTrading && this.uniswap !== null;
   }
 
   /**
@@ -42,8 +71,7 @@ export class Prophesier {
   async mintProphecy(prediction: Prediction): Promise<ProphecyNFT> {
     console.log(`🔮 Minting Prophecy NFT for ${prediction.market}...`);
 
-    // Calculate mint cost (0.01 ETH)
-    const mintCost = ethers.parseEther('0.01');
+    // Mint cost would be 0.01 ETH (in production, call contract)
     
     // Prepare NFT data
     const tokenId = `prophecy_${Date.now()}`;
@@ -72,32 +100,115 @@ export class Prophesier {
 
   /**
    * Stake on a prediction by trading
+   * Uses Uniswap V3 for real trades if enabled, otherwise simulates
    */
   async stakeOnPrediction(prediction: Prediction): Promise<TradeResult> {
     console.log(`💰 Staking on prediction: ${prediction.direction} ${prediction.market}`);
 
     // Calculate stake amount (5% of wallet balance, max 0.1 ETH)
-    const balance = await this.wallet.getBalance('ETH');
+    const balanceStr = await this.wallet.getBalance();
+    const balance = parseFloat(balanceStr) || 0;
     const stakeAmount = Math.min(balance * 0.05, 0.1);
     
     // Determine trade direction
     const tradeDirection = prediction.direction === 'bullish' ? 'buy' : 'sell';
     const token = prediction.market === 'ETH' ? 'WETH' : prediction.market;
 
-    // Execute trade (simplified - would use DEX in production)
+    // Try to execute real trade if enabled
+    if (this.enableRealTrading && this.uniswap) {
+      try {
+        const swapResult = await this.executeRealTrade(
+          tradeDirection,
+          stakeAmount.toString(),
+          token
+        );
+        
+        console.log(`✅ REAL trade executed: ${tradeDirection} ${stakeAmount} ${token}`);
+        console.log(`   Tx Hash: ${swapResult.hash}`);
+        
+        prediction.stakeAmount = stakeAmount;
+        
+        return {
+          hash: swapResult.hash,
+          amount: stakeAmount,
+          token,
+          direction: tradeDirection
+        };
+      } catch (error) {
+        console.error('Real trade failed, falling back to simulated:', error);
+      }
+    }
+
+    // Simulated trade (fallback)
     const tradeResult: TradeResult = {
-      hash: `0x${Math.random().toString(16).substr(2, 64)}`,
+      hash: `0xsim_${Math.random().toString(16).substr(2, 60)}`,
       amount: stakeAmount,
       token,
       direction: tradeDirection
     };
 
-    console.log(`✅ Trade executed: ${tradeDirection} ${stakeAmount} ${token}`);
+    console.log(`✅ SIMULATED trade: ${tradeDirection} ${stakeAmount} ${token}`);
     
     // Update prediction with stake
     prediction.stakeAmount = stakeAmount;
 
     return tradeResult;
+  }
+
+  /**
+   * Execute real trade via Uniswap V3
+   */
+  private async executeRealTrade(
+    direction: 'buy' | 'sell',
+    amountEth: string,
+    token: string
+  ): Promise<SwapResult> {
+    if (!this.uniswap) {
+      throw new Error('Uniswap not initialized');
+    }
+
+    const tokens = this.uniswap.getTokens();
+    
+    // Map token symbol to address
+    const tokenAddress = this.getTokenAddress(token, tokens);
+    
+    if (direction === 'buy') {
+      // Buy token with ETH
+      return this.uniswap.swapEthToToken(tokenAddress, amountEth, 1.0); // 1% slippage
+    } else {
+      // Sell token for ETH - first need to have the token
+      // For simplicity, convert to a smaller ETH sale
+      const amountIn = parseUnits(amountEth, 18);
+      return this.uniswap.swap({
+        tokenIn: tokenAddress,
+        tokenOut: tokens.WETH,
+        amountIn,
+        slippagePercent: 1.0,
+      });
+    }
+  }
+
+  /**
+   * Get token address from symbol
+   */
+  private getTokenAddress(symbol: string, tokens: typeof BASE_TOKENS): `0x${string}` {
+    const upperSymbol = symbol.toUpperCase();
+    
+    // Map common symbols to addresses
+    const tokenMap: Record<string, keyof typeof BASE_TOKENS> = {
+      'ETH': 'WETH',
+      'WETH': 'WETH',
+      'USDC': 'USDC',
+      'DAI': 'DAI',
+    };
+
+    const tokenKey = tokenMap[upperSymbol];
+    if (tokenKey && tokens[tokenKey]) {
+      return tokens[tokenKey];
+    }
+
+    // Default to USDC for unknown tokens
+    return tokens.USDC;
   }
 
   /**

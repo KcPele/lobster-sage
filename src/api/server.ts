@@ -204,13 +204,78 @@ app.post('/autonomous/stop', requireSage, async (_req: Request, res: Response) =
 
 // ============ NFT Operations ============
 
+// Make prediction AND mint as NFT in one call - REAL ONCHAIN TX
+app.post('/predict-and-mint', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { market, timeframe } = req.body;
+    const targetMarket = market || 'ETH';
+    const targetTimeframe = timeframe || '7d';
+    
+    console.log(`🔮 Making prediction for ${targetMarket} and minting as NFT...`);
+    
+    // Make prediction
+    const prediction = await sage!.makePrediction(targetMarket, targetTimeframe);
+    
+    if (!prediction) {
+      res.json({ 
+        status: 'no_prediction',
+        message: 'No prediction generated - market conditions may not meet confidence threshold'
+      });
+      return;
+    }
+
+    // Mint as NFT (this calls the real contract!)
+    const nft = await sage!.mintPredictionAsNFT(prediction);
+    
+    res.json({
+      status: 'success',
+      prediction: {
+        market: prediction.market,
+        direction: prediction.direction,
+        confidence: prediction.confidence,
+        targetPrice: prediction.targetPrice,
+        timeframe: prediction.timeframe
+      },
+      nft: {
+        tokenId: nft.tokenId,
+        txHash: nft.txHash,
+        basescanUrl: nft.txHash ? `https://sepolia.basescan.org/tx/${nft.txHash}` : null,
+        stakeAmount: nft.stakeAmount
+      },
+      message: nft.txHash 
+        ? `Prophecy NFT minted onchain! TX: ${nft.txHash}` 
+        : 'Prophecy created (simulated mode)'
+    });
+  } catch (error: any) {
+    console.error('Predict and mint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/nft/mint', requireSage, async (req: Request, res: Response) => {
   try {
-    const { predictionId } = req.body;
+    const { market } = req.body;
+    const targetMarket = market || 'ETH';
+    
+    // Make a quick prediction and mint it
+    const prediction = await sage!.makePrediction(targetMarket, '7d');
+    
+    if (!prediction) {
+      res.json({ 
+        status: 'no_prediction',
+        message: 'Could not generate prediction for minting'
+      });
+      return;
+    }
+
+    const nft = await sage!.mintPredictionAsNFT(prediction);
+    
     res.json({ 
       status: 'minted',
-      message: 'Prophecy NFT minting initiated',
-      predictionId
+      tokenId: nft.tokenId,
+      txHash: nft.txHash,
+      basescanUrl: nft.txHash ? `https://sepolia.basescan.org/tx/${nft.txHash}` : null,
+      message: nft.txHash ? 'NFT minted onchain!' : 'NFT minted (simulated)'
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

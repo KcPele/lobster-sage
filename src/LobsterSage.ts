@@ -354,6 +354,14 @@ export class LobsterSage {
   }
 
   /**
+   * Mint a prediction as an NFT - REAL ONCHAIN TRANSACTION
+   */
+  async mintPredictionAsNFT(prediction: Prediction): Promise<any> {
+    console.log(`🔮 Minting prediction as Prophecy NFT...`);
+    return this.prophesier.mintProphecy(prediction);
+  }
+
+  /**
    * Get current reputation
    */
   async getReputation(): Promise<any> {

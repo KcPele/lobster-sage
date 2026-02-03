@@ -1,10 +1,50 @@
 import { WalletManager } from '../wallet/manager';
 import { Prediction } from './predictor';
 import { UniswapV3, BASE_TOKENS, type SwapResult } from '../defi/UniswapV3';
-import { parseUnits } from 'viem';
+import { parseUnits, parseEther, encodeFunctionData, type Address } from 'viem';
+
+// ProphecyNFT Contract ABI (minimal for minting)
+const PROPHECY_NFT_ABI = [
+  {
+    name: 'mintProphecy',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'target', type: 'string' },
+      { name: 'predictionType', type: 'uint256' },
+      { name: 'prediction', type: 'string' },
+      { name: 'confidence', type: 'uint256' },
+      { name: 'resolvesAt', type: 'uint256' },
+      { name: 'uri', type: 'string' }
+    ],
+    outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    name: 'mintFee',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    name: 'minStake',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    name: 'getCurrentTokenId',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }]
+  }
+] as const;
 
 export interface ProphecyNFT {
   tokenId: string;
+  txHash?: string;
   predictionId: string;
   market: string;
   direction: string;
@@ -27,16 +67,28 @@ export interface TradeResult {
  * Prophesier - Handles NFT minting and trading based on predictions
  * 
  * Supports real trading via Uniswap V3 when enabled
+ * Now makes REAL onchain transactions!
  */
 export class Prophesier {
   private wallet: WalletManager;
+  private contractAddress: Address;
   private prophecies: Map<string, ProphecyNFT> = new Map();
   private activePredictions: Set<string> = new Set();
   private uniswap: UniswapV3 | null = null;
   private enableRealTrading: boolean = false;
+  private enableRealMinting: boolean = true; // Enable real NFT minting by default
 
-  constructor(_contractAddress: string, wallet: WalletManager) {
+  constructor(contractAddress: string, wallet: WalletManager) {
     this.wallet = wallet;
+    this.contractAddress = contractAddress as Address;
+  }
+
+  /**
+   * Enable/disable real NFT minting
+   */
+  setRealMinting(enabled: boolean): void {
+    this.enableRealMinting = enabled;
+    console.log(`🔮 Real NFT minting ${enabled ? 'enabled' : 'disabled'}`);
   }
 
   /**
@@ -66,15 +118,109 @@ export class Prophesier {
   }
 
   /**
-   * Mint a Prophecy NFT for a prediction
+   * Mint a Prophecy NFT for a prediction - REAL ONCHAIN TRANSACTION
    */
   async mintProphecy(prediction: Prediction): Promise<ProphecyNFT> {
     console.log(`🔮 Minting Prophecy NFT for ${prediction.market}...`);
 
-    // Mint cost would be 0.01 ETH (in production, call contract)
+    // Check if real minting is enabled and we have a valid contract
+    if (this.enableRealMinting && this.contractAddress && this.contractAddress !== '0x0000000000000000000000000000000000000000') {
+      try {
+        return await this.mintProphecyOnchain(prediction);
+      } catch (error: any) {
+        console.error('❌ Real minting failed:', error.message);
+        console.log('⚠️ Falling back to simulated minting...');
+      }
+    }
+
+    // Fallback: simulated minting
+    return this.mintProphecySimulated(prediction);
+  }
+
+  /**
+   * Mint Prophecy NFT on the actual blockchain
+   */
+  private async mintProphecyOnchain(prediction: Prediction): Promise<ProphecyNFT> {
+    console.log(`🔷 Executing REAL onchain mint on ${this.contractAddress}...`);
+
+    const walletProvider = this.wallet.getWalletProvider();
+    if (!walletProvider) {
+      throw new Error('Wallet provider not initialized');
+    }
+
+    // Prepare prediction data for contract
+    const target = prediction.market; // e.g., "ETH"
+    const predictionType = 0n; // 0 = Price prediction
+    const predictionText = `${prediction.direction.toUpperCase()}: ${prediction.market} to $${prediction.targetPrice} (${prediction.confidence}% confidence)`;
+    const confidence = BigInt(prediction.confidence);
     
-    // Prepare NFT data
-    const tokenId = `prophecy_${Date.now()}`;
+    // Resolution time: parse timeframe (e.g., "7d" -> 7 days from now)
+    const timeframeDays = parseInt(prediction.timeframe) || 7;
+    const resolvesAt = BigInt(Math.floor(Date.now() / 1000) + (timeframeDays * 24 * 60 * 60));
+    
+    // Metadata URI (could point to IPFS in production)
+    const uri = `data:application/json,{"name":"Prophecy: ${prediction.market}","description":"${predictionText}","attributes":[{"trait_type":"Market","value":"${prediction.market}"},{"trait_type":"Direction","value":"${prediction.direction}"},{"trait_type":"Confidence","value":${prediction.confidence}}]}`;
+
+    // Calculate payment: mintFee (0.001 ETH) + minStake (0.01 ETH) = 0.011 ETH minimum
+    const mintFee = parseEther('0.001');
+    const stakeAmount = parseEther('0.01'); // Minimum stake
+    const totalValue = mintFee + stakeAmount;
+
+    console.log(`   Target: ${target}`);
+    console.log(`   Prediction: ${predictionText}`);
+    console.log(`   Confidence: ${confidence}%`);
+    console.log(`   Resolves: ${new Date(Number(resolvesAt) * 1000).toISOString()}`);
+    console.log(`   Payment: ${Number(totalValue) / 1e18} ETH`);
+
+    // Encode the function call
+    const data = encodeFunctionData({
+      abi: PROPHECY_NFT_ABI,
+      functionName: 'mintProphecy',
+      args: [target, predictionType, predictionText, confidence, resolvesAt, uri]
+    });
+
+    // Send transaction
+    const txHash = await walletProvider.sendTransaction({
+      to: this.contractAddress,
+      data: data,
+      value: totalValue,
+    });
+
+    console.log(`✅ Transaction sent: ${txHash}`);
+    console.log(`🔗 View on Basescan: https://sepolia.basescan.org/tx/${txHash}`);
+
+    // Create prophecy record
+    const tokenId = `prophecy_${Date.now()}_${txHash.slice(0, 10)}`;
+    
+    const prophecy: ProphecyNFT = {
+      tokenId,
+      txHash,
+      predictionId: prediction.id,
+      market: prediction.market,
+      direction: prediction.direction,
+      confidence: prediction.confidence,
+      targetPrice: prediction.targetPrice,
+      timeframe: prediction.timeframe,
+      mintedAt: Date.now(),
+      stakeAmount: Number(stakeAmount) / 1e18,
+      status: 'active'
+    };
+
+    this.prophecies.set(tokenId, prophecy);
+    this.activePredictions.add(prediction.id);
+
+    console.log(`🎉 Prophecy NFT minted onchain! Token ID: ${tokenId}`);
+    
+    return prophecy;
+  }
+
+  /**
+   * Simulated minting (for testing or when contract not available)
+   */
+  private mintProphecySimulated(prediction: Prediction): ProphecyNFT {
+    console.log(`📝 Simulated mint (no real transaction)`);
+
+    const tokenId = `prophecy_sim_${Date.now()}`;
     
     const prophecy: ProphecyNFT = {
       tokenId,
@@ -89,11 +235,10 @@ export class Prophesier {
       status: 'active'
     };
 
-    // Store locally (would call contract in production)
     this.prophecies.set(tokenId, prophecy);
     this.activePredictions.add(prediction.id);
 
-    console.log(`✅ Minted Prophecy NFT #${tokenId}`);
+    console.log(`✅ Simulated Prophecy NFT #${tokenId}`);
     
     return prophecy;
   }

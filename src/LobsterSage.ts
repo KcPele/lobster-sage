@@ -688,6 +688,163 @@ Built on @base with @coinbase AgentKit 🦞`;
   }
 
   /**
+   * Get market sentiment (Fear/Greed approximation)
+   */
+  async getMarketSentiment(): Promise<any> {
+    try {
+      const trends = await this.getEcosystemTrends();
+
+      // Calculate sentiment from trends
+      let bullishCount = 0;
+      let bearishCount = 0;
+      let sentimentScore = 50; // Neutral base
+
+      trends.forEach(trend => {
+        if (trend.severity === 'critical') {
+          if (trend.category === 'tvl_growth' || trend.category === 'volume_spike') {
+            bullishCount += 2;
+          } else if (trend.category === 'whale_activity') {
+            // Check if whale activity is buy or sell
+            const movement = trend.metrics?.type;
+            if (movement === 'buy') {
+              bullishCount++;
+            } else if (movement === 'sell') {
+              bearishCount++;
+            }
+          }
+        } else if (trend.severity === 'high') {
+          if (trend.category === 'launch' || trend.category === 'governance') {
+            bullishCount++;
+          }
+        }
+      });
+
+      // Calculate score (0-100)
+      const totalSignals = bullishCount + bearishCount;
+      if (totalSignals > 0) {
+        sentimentScore = Math.round(50 + ((bullishCount - bearishCount) / totalSignals) * 40);
+      }
+
+      return {
+        score: sentimentScore,
+        trend: sentimentScore > 70
+          ? 'extreme_greed'
+          : sentimentScore > 55
+          ? 'greed'
+          : sentimentScore > 45
+          ? 'neutral'
+          : sentimentScore > 25
+          ? 'fear'
+          : 'extreme_fear',
+        bullishSignals: bullishCount,
+        bearishSignals: bearishCount,
+        timestamp: Date.now(),
+      };
+    } catch (error) {
+      console.error('Error getting market sentiment:', error);
+      return { score: 50, trend: 'neutral' };
+    }
+  }
+
+  /**
+   * Get on-chain metrics
+   */
+  async getOnchainMetrics(): Promise<any> {
+    try {
+      const client = this.wallet.getPublicClient();
+
+      // Get latest block
+      const block = await client.getBlock();
+
+      // Get pending transactions (approximated by comparing block timestamps)
+      // In production, you'd use mempool APIs
+      const currentGasPrice = await client.getGasPrice();
+
+      // Estimate congestion based on gas price
+      // Base average gas: ~0.001 gwei for L1, ~1 gwei for L2
+      const baseGasPrice = 1000000000n; // 1 gwei
+      const gasRatio = Number(currentGasPrice) / Number(baseGasPrice);
+
+      const congestionLevel = Math.min(100, Math.round(gasRatio * 100));
+
+      // Estimate pending transactions
+      const pendingTxCount = Math.round(congestionLevel * 10); // Rough estimate
+
+      return {
+        blockNumber: block.number,
+        baseFeePerGas: Number(currentGasPrice),
+        congestionLevel,
+        gasTrend: congestionLevel > 70 ? 'rising' : congestionLevel > 40 ? 'stable' : 'falling',
+        estimatedPendingTx: pendingTxCount,
+        recommendation:
+          congestionLevel > 70
+            ? 'High congestion - consider waiting'
+            : congestionLevel > 40
+            ? 'Moderate congestion'
+            : 'Low congestion - good time to trade',
+        timestamp: Date.now(),
+      };
+    } catch (error) {
+      console.error('Error getting on-chain metrics:', error);
+      return {
+        congestionLevel: 50,
+        gasTrend: 'stable',
+        recommendation: 'Unable to fetch metrics',
+      };
+    }
+  }
+
+  /**
+   * Track whale activity
+   */
+  async trackWhaleActivity(symbol: string = 'ETH'): Promise<any> {
+    try {
+      // Get whale movements from analytics
+      const analytics = await this.analytics.getFullSnapshot();
+      const whaleMovements = analytics?.whaleMovements || [];
+
+      // Filter by symbol
+      const symbolMovements = whaleMovements
+        .filter((m: any) =>
+          m.asset?.toLowerCase() === symbol.toLowerCase() ||
+          symbol.toLowerCase().includes(m.asset?.toLowerCase() || '')
+        )
+        .slice(0, 10); // Last 10 movements
+
+      // Calculate sentiment
+      const buys = symbolMovements.filter((m: any) => m.type === 'buy').length;
+      const sells = symbolMovements.filter((m: any) => m.type === 'sell').length;
+      const totalVolume = symbolMovements.reduce((sum: number, m: any) => sum + (m.valueUsd || 0), 0);
+
+      const sentiment =
+        buys > sells * 1.5
+          ? 'bullish'
+          : sells > buys * 1.5
+          ? 'bearish'
+          : 'neutral';
+
+      return {
+        recent: symbolMovements,
+        totalVolume,
+        buyPressure: Math.round((buys / (buys + sells || 1)) * 100),
+        sellPressure: Math.round((sells / (buys + sells || 1)) * 100),
+        sentiment,
+        buyCount: buys,
+        sellCount: sells,
+      };
+    } catch (error) {
+      console.error('Error tracking whale activity:', error);
+      return {
+        recent: [],
+        totalVolume: 0,
+        buyPressure: 50,
+        sellPressure: 50,
+        sentiment: 'neutral',
+      };
+    }
+  }
+
+  /**
    * Sleep helper
    */
   private sleep(ms: number): Promise<void> {

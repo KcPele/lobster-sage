@@ -8,6 +8,7 @@
 import express, { Request, Response, NextFunction, Application } from 'express';
 import cors from 'cors';
 import { LobsterSage } from '../LobsterSage';
+import technicalAnalysisEngine from './technical-analysis';
 
 const app: Application = express();
 app.use(cors());
@@ -552,6 +553,218 @@ app.post('/farcaster/post', requireSage, async (req: Request, res: Response) => 
   }
 });
 
+// ============ Enhanced Analysis Endpoints ============
+
+// Technical Analysis - RSI, MACD, Moving Averages, Bollinger Bands
+// GET /analysis/technical?symbol=ETH
+app.get('/analysis/technical', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { symbol } = req.query;
+    const targetSymbol = (symbol as string) || 'ETH';
+
+    console.log(`📊 API: Running technical analysis for ${targetSymbol}...`);
+    const analysis = await technicalAnalysisEngine.analyze(targetSymbol);
+
+    res.json({
+      symbol: targetSymbol,
+      analysis,
+      recommendations: {
+        action: analysis.overallSignal,
+        confidence: analysis.confidence,
+        reasoning: analysis.reasoning,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Technical analysis error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Quick RSI Check
+// GET /analysis/rsi?symbol=ETH&period=14
+app.get('/analysis/rsi', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { symbol, period = 14 } = req.query;
+    const targetSymbol = (symbol as string) || 'ETH';
+    const rsiPeriod = parseInt(period as string) || 14;
+
+    // Fetch price history and calculate RSI
+    const response = await technicalAnalysisEngine.analyze(targetSymbol);
+    res.json({
+      symbol: targetSymbol,
+      period: rsiPeriod,
+      rsi: response.rsi.rsi,
+      signal: response.rsi.signal,
+      interpretation: response.rsi.interpretation,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Market Sentiment & Fear/Greed Index
+// GET /analysis/sentiment
+app.get('/analysis/sentiment', requireSage, async (_req: Request, res: Response) => {
+  try {
+    const sentiment = await sage!.getMarketSentiment();
+    res.json({
+      overall: sentiment,
+      timestamp: new Date().toISOString(),
+      interpretation: sentiment.score > 75
+        ? 'Extreme Greed - Potential pullback'
+        : sentiment.score > 55
+        ? 'Greed - Bullish but cautious'
+        : sentiment.score > 45
+        ? 'Neutral - Balanced market'
+        : sentiment.score > 25
+        ? 'Fear - Bearish but potential bounce'
+        : 'Extreme Fear - Capitulation zone',
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// On-chain Metrics - Gas, Congestion, Activity
+// GET /analysis/onchain
+app.get('/analysis/onchain', requireSage, async (_req: Request, res: Response) => {
+  try {
+    const metrics = await sage!.getOnchainMetrics();
+    res.json({
+      metrics,
+      timestamp: new Date().toISOString(),
+      interpretation: metrics.congestionLevel > 70
+        ? 'High congestion - consider waiting'
+        : metrics.congestionLevel > 40
+        ? 'Moderate congestion'
+        : 'Low congestion - good time to trade',
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Whale Activity Tracking
+// GET /analysis/whales?symbol=ETH
+app.get('/analysis/whales', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { symbol } = req.query;
+    const targetSymbol = (symbol as string) || 'ETH';
+
+    const whaleActivity = await sage!.trackWhaleActivity(targetSymbol);
+
+    res.json({
+      symbol: targetSymbol,
+      recentMovements: whaleActivity.recent || [],
+      summary: {
+        totalVolume24h: whaleActivity.totalVolume || 0,
+        buyPressure: whaleActivity.buyPressure || 0,
+        sellPressure: whaleActivity.sellPressure || 0,
+        sentiment: whaleActivity.sentiment || 'neutral',
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Yield Opportunities with APY Analysis
+// GET /analysis/yields?minApy=2
+app.get('/analysis/yields', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { minApy = 0 } = req.query;
+    const minApyValue = parseFloat(minApy as string) || 0;
+
+    const yields = await sage!.getYieldOpportunities();
+
+    // Filter by minimum APY and sort
+    const filteredYields = yields
+      .filter(y => (y.apy || 0) >= minApyValue)
+      .sort((a, b) => (b.apy || 0) - (a.apy || 0))
+      .slice(0, 20);
+
+    res.json({
+      opportunities: filteredYields,
+      best: filteredYields[0] || null,
+      count: filteredYields.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Comprehensive Market Report (combines all analysis)
+// GET /analysis/report?symbol=ETH
+app.get('/analysis/report', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { symbol = 'ETH' } = req.query;
+
+    console.log(`📊 API: Generating comprehensive market report for ${symbol}...`);
+
+    // Run all analyses in parallel
+    const [technical, sentiment, onchain, whales, yields] = await Promise.all([
+      technicalAnalysisEngine.analyze(symbol as string).catch(() => null),
+      sage!.getMarketSentiment().catch(() => ({ score: 50 })),
+      sage!.getOnchainMetrics().catch(() => ({})),
+      sage!.trackWhaleActivity(symbol as string).catch(() => ({})),
+      sage!.getYieldOpportunities().catch(() => []),
+    ]);
+
+    // Generate summary
+    const overallScore = {
+      technical: technical?.confidence || 50,
+      sentiment: sentiment?.score || 50,
+      onchain: 100 - (onchain?.congestionLevel || 0),
+      whale: whales?.sentiment === 'bullish' ? 70 : whales?.sentiment === 'bearish' ? 30 : 50,
+    };
+
+    const avgScore =
+      (overallScore.technical +
+        overallScore.sentiment +
+        overallScore.onchain +
+        overallScore.whale) /
+      4;
+
+    res.json({
+      symbol,
+      summary: {
+        overallSignal:
+          avgScore > 75
+            ? 'strong_buy'
+            : avgScore > 60
+            ? 'buy'
+            : avgScore > 40
+            ? 'neutral'
+            : avgScore > 25
+            ? 'sell'
+            : 'strong_sell',
+        confidence: Math.round(avgScore),
+        scores: overallScore,
+      },
+      technical: technical
+        ? {
+            rsi: technical.rsi.rsi,
+            rsiSignal: technical.rsi.signal,
+            macdSignal: technical.macd.signal,
+            trend: technical.movingAverages.trend,
+            bollingerPosition: technical.bollingerBands.position,
+          }
+        : null,
+      sentiment,
+      onchain,
+      whaleActivity: whales,
+      topYields: yields.slice(0, 5),
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Market report error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ NFT Operations ============
 
 // Make prediction AND mint as NFT in one call - REAL ONCHAIN TX
@@ -651,22 +864,31 @@ initSage().then(() => {
     console.log(`
 🦞 ═══════════════════════════════════════════════════════
    LobsterSage API Server Running
-   
+
    URL: http://localhost:${PORT}
-   
+
    Core Endpoints (for OpenClaw):
    GET  /health           - Health check
    GET  /status           - Agent status & wallet info
    POST /predict-and-mint - Make prediction + mint NFT (REAL TX!)
    GET  /portfolio        - Portfolio summary
    GET  /reputation       - Reputation score
-   
+
    Analysis Endpoints:
    POST /predict          - Make prediction only
    GET  /analysis         - Market analysis
    GET  /trends           - Ecosystem trends
    GET  /yields           - Yield opportunities
-   
+
+   🆕 Enhanced Analysis Endpoints:
+   GET  /analysis/technical  - Technical indicators (RSI, MACD, MA, Bollinger)
+   GET  /analysis/rsi        - RSI indicator only
+   GET  /analysis/sentiment  - Market sentiment (Fear/Greed)
+   GET  /analysis/onchain    - On-chain metrics (gas, congestion)
+   GET  /analysis/whales     - Whale activity tracking
+   GET  /analysis/yields     - Yield opportunities with APY filtering
+   GET  /analysis/report     - Comprehensive market report (all analyses combined)
+
    OpenClaw orchestrates scheduling - this API just executes!
 ═══════════════════════════════════════════════════════ 🦞
     `);

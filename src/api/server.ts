@@ -14,7 +14,7 @@ app.use(cors());
 app.use(express.json());
 
 // Prevent crashes from background analytics errors (AgentKit)
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason,) => {
   console.error('⚠️  Unhandled Rejection:', reason);
   // Do not exit process
 });

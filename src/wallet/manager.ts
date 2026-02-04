@@ -1,7 +1,14 @@
-import { CdpEvmWalletProvider, ViemWalletProvider } from '@coinbase/agentkit';
+import { CdpClient, type EvmServerAccount } from '@coinbase/cdp-sdk';
 import { ethers } from 'ethers';
-import { createPublicClient, createWalletClient, http } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
+import { 
+  createPublicClient, 
+  createWalletClient, 
+  http, 
+  type WalletClient,
+  type PublicClient,
+  type Chain,
+} from 'viem';
+import { privateKeyToAccount, toAccount } from 'viem/accounts';
 import { baseSepolia, base } from 'viem/chains';
 
 export interface WalletConfig {
@@ -11,6 +18,7 @@ export interface WalletConfig {
   walletData?: string;
   walletAddress?: string;
   privateKey?: string;
+  accountName?: string;
 }
 
 export interface TransactionResult {
@@ -32,32 +40,31 @@ export interface TokenBalance {
 /**
  * Wallet Manager for LobsterSage
  * Handles wallet creation, transaction signing, and balance tracking
- * using Coinbase AgentKit CDP Wallet Provider or Viem with private key
+ * using Coinbase CDP SDK with viem WalletClient support or private key fallback
  */
 export class WalletManager {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private walletProvider: any = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private publicClient: any = null;
+  private publicClient: PublicClient | null = null;
+  private walletClient: WalletClient | null = null;
+  private cdpClient: CdpClient | null = null;
+  private cdpAccount: EvmServerAccount | null = null;
   private networkId: string;
   private isInitialized = false;
   private walletAddress: string = '';
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private walletClient: any = null;
+  private chain: Chain;
+  private useCdp = false;
 
   constructor(config?: WalletConfig) {
     this.networkId = config?.networkId || process.env.NETWORK_ID || 'base-sepolia';
+    this.chain = this.networkId === 'base-mainnet' ? base : baseSepolia;
   }
 
   /**
-   * Initialize the wallet manager with CDP AgentKit or Private Key
+   * Initialize the wallet manager with CDP SDK or Private Key
    */
   async initialize(config?: WalletConfig): Promise<void> {
-    const chain = this.networkId === 'base-mainnet' ? base : baseSepolia;
-    
     // Initialize public client for reading blockchain data (always needed)
     this.publicClient = createPublicClient({
-      chain,
+      chain: this.chain,
       transport: http(this.getRpcUrl()),
     });
 
@@ -66,34 +73,69 @@ export class WalletManager {
     const apiKeySecret = config?.apiKeyPrivate || process.env.CDP_API_KEY_SECRET;
     const walletSecret = process.env.CDP_WALLET_SECRET;
 
-    if (apiKeyId && apiKeySecret && walletSecret) {
+    if (apiKeyId && apiKeySecret) {
       try {
-        console.log('🔷 Attempting CDP initialization (Coinbase Developer Platform)...');
+        console.log('🔷 Attempting CDP SDK initialization (Coinbase Developer Platform)...');
         console.log(`   API Key ID: ${apiKeyId.substring(0, 30)}...`);
         console.log(`   Network: ${this.networkId}`);
 
-        // Configure CDP Wallet Provider - SDK reads env vars directly
-        const walletConfig: any = {
-          networkId: this.networkId,
-        };
+        // Initialize CDP Client
+        this.cdpClient = new CdpClient({
+          apiKeyId,
+          apiKeySecret,
+          walletSecret, // Optional but recommended for write operations
+        });
 
-        // If we have existing wallet address, use it
-        if (config?.walletAddress || process.env.CDP_WALLET_ADDRESS) {
-          walletConfig.address = config?.walletAddress || process.env.CDP_WALLET_ADDRESS;
-          console.log(`   Using existing wallet address: ${walletConfig.address}`);
-        }
+        // Get or create a named account for this agent
+        const accountName = config?.accountName || process.env.CDP_ACCOUNT_NAME || 'lobster-sage-main';
+        console.log(`   Using account name: ${accountName}`);
+        
+        this.cdpAccount = await this.cdpClient.evm.getOrCreateAccount({ 
+          name: accountName 
+        });
+        
+        this.walletAddress = this.cdpAccount.address;
+        
+        // Create viem-compatible account using toAccount()
+        // EvmServerAccount already has sign, signMessage, signTransaction, signTypedData
+        const viemAccount = toAccount({
+          address: this.walletAddress as `0x${string}`,
+          
+          // Sign message using CDP account
+          signMessage: async ({ message }) => {
+            const result = await this.cdpAccount!.signMessage({ message });
+            return result as `0x${string}`;
+          },
+          
+          // Sign typed data using CDP account
+          signTypedData: async (typedData) => {
+            const result = await this.cdpAccount!.signTypedData(typedData as any);
+            return result as `0x${string}`;
+          },
+          
+          // Sign transaction using CDP account
+          signTransaction: async (transaction) => {
+            const result = await this.cdpAccount!.signTransaction(transaction);
+            return result as `0x${string}`;
+          },
+        });
 
-        // Initialize CDP EVM Wallet Provider
-        this.walletProvider = await CdpEvmWalletProvider.configureWithWallet(walletConfig);
-        this.walletAddress = await this.walletProvider.getAddress();
+        // Create WalletClient with the wrapped CDP account
+        this.walletClient = createWalletClient({
+          account: viemAccount,
+          chain: this.chain,
+          transport: http(this.getRpcUrl()),
+        });
+
+        this.useCdp = true;
         this.isInitialized = true;
         
-        console.log(`✅ WalletManager initialized with CDP AgentKit on ${this.networkId}`);
+        console.log(`✅ WalletManager initialized with CDP SDK on ${this.networkId}`);
         console.log(`📍 Address: ${this.walletAddress}`);
-        console.log(`🔷 Using Coinbase Developer Platform - Full Base stack!`);
+        console.log(`🔗 WalletClient available for DeFi operations!`);
         return;
       } catch (error: any) {
-        console.error('Failed to initialize with CDP:', error.message);
+        console.error('Failed to initialize with CDP SDK:', error.message);
         if (error.cause) console.error('Cause:', error.cause);
         console.log('⚠️  Falling back to private key...');
       }
@@ -106,16 +148,12 @@ export class WalletManager {
         console.log('🔑 Initializing with private key (fallback)...');
         
         const account = privateKeyToAccount(privateKey as `0x${string}`);
-        const walletClient = createWalletClient({
+        this.walletClient = createWalletClient({
           account,
-          chain,
+          chain: this.chain,
           transport: http(this.getRpcUrl()),
         });
         
-        // Use type cast to avoid version incompatibility issues
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.walletProvider = new ViemWalletProvider(walletClient as any);
-        this.walletClient = walletClient;
         this.walletAddress = account.address;
         this.isInitialized = true;
         
@@ -131,7 +169,7 @@ export class WalletManager {
     console.log('⚠️  No valid wallet credentials found. Running in DEMO mode.');
     console.log('   Options:');
     console.log('   1. Set PRIVATE_KEY (0x... format, 66 chars) for direct wallet access');
-    console.log('   2. Set CDP_API_KEY_ID, CDP_API_KEY_SECRET, and CDP_WALLET_SECRET for CDP');
+    console.log('   2. Set CDP_API_KEY_ID and CDP_API_KEY_SECRET for CDP');
     
     this.isInitialized = true;
     this.walletAddress = '0x0000000000000000000000000000000000000001';
@@ -234,13 +272,12 @@ export class WalletManager {
    * Export wallet data for backup
    */
   async exportWallet(): Promise<string> {
-    if (!this.walletProvider) {
-      throw new Error('WalletManager not initialized with real wallet');
-    }
-    // exportWallet only exists on CDP provider, not Viem provider
-    if (typeof this.walletProvider.exportWallet === 'function') {
-      const walletData = await this.walletProvider.exportWallet();
-      return JSON.stringify(walletData);
+    if (this.useCdp && this.cdpAccount) {
+      return JSON.stringify({ 
+        address: this.walletAddress, 
+        type: 'cdp',
+        accountName: this.cdpAccount.name || 'lobster-sage-main'
+      });
     }
     return JSON.stringify({ address: this.walletAddress, type: 'private_key' });
   }
@@ -260,27 +297,81 @@ export class WalletManager {
   }
 
   /**
-   * Get the underlying wallet provider
+   * Get the underlying CDP account (for native CDP operations)
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getWalletProvider(): any {
-    return this.walletProvider;
+  getCdpAccount(): EvmServerAccount | null {
+    return this.cdpAccount;
   }
 
   /**
-   * Get the underlying viem wallet client (if available)
+   * Get the underlying CDP client
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getWalletClient(): any {
+  getCdpClient(): CdpClient | null {
+    return this.cdpClient;
+  }
+
+  /**
+   * Check if using CDP
+   */
+  isUsingCdp(): boolean {
+    return this.useCdp;
+  }
+
+  /**
+   * Get the underlying wallet provider (for backward compatibility)
+   * Returns the walletClient which now works for both CDP and private key modes
+   */
+  getWalletProvider(): WalletClient | null {
+    return this.walletClient;
+  }
+
+  /**
+   * Get the underlying viem wallet client
+   * This is the KEY method - now works with CDP accounts too!
+   */
+  getWalletClient(): WalletClient | null {
     return this.walletClient;
   }
 
   /**
    * Get public client for reading blockchain data
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getPublicClient(): any {
+  getPublicClient(): PublicClient | null {
     return this.publicClient;
+  }
+
+  /**
+   * Execute a native CDP swap (bonus feature!)
+   * Uses CDP's built-in swap functionality via network-scoped account
+   */
+  async cdpSwap(params: {
+    fromToken: string;
+    toToken: string;
+    fromAmount: bigint;
+    slippageBps?: number;
+  }): Promise<{ transactionHash: string }> {
+    if (!this.cdpAccount) {
+      throw new Error('CDP account not available - this method only works in CDP mode');
+    }
+
+    const network = this.networkId === 'base-mainnet' ? 'base' : 'base-sepolia';
+    
+    // Get network-scoped account for swap operations
+    const networkAccount = await this.cdpAccount.useNetwork(network as 'base' | 'base-sepolia');
+    
+    // Check if swap is available on this network account
+    if (!('swap' in networkAccount)) {
+      throw new Error(`Swap not available for network ${network}. Try using Uniswap instead.`);
+    }
+
+    const result = await (networkAccount as any).swap({
+      fromToken: params.fromToken,
+      toToken: params.toToken,
+      fromAmount: params.fromAmount,
+      slippageBps: params.slippageBps || 100, // Default 1% slippage
+    });
+
+    return { transactionHash: result.transactionHash };
   }
 
   // ============ Private Helpers ============

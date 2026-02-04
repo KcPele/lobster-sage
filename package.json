@@ -29,9 +29,7 @@
   "author": "kcpele",
   "license": "MIT",
   "dependencies": {
-    "@coinbase/agentkit": "^0.10.4",
-    "@coinbase/cdp-agentkit-core": "^0.0.13",
-    "@coinbase/cdp-langchain": "^0.0.14",
+    "@coinbase/cdp-sdk": "^1.44.0",
     "@openzeppelin/contracts": "^5.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

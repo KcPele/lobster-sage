@@ -220,11 +220,14 @@ export class Prophesier {
       args: [target, predictionType, predictionText, confidence, resolvesAt, uri]
     });
 
-    // Send transaction
-    const txHash = await walletProvider.sendTransaction({
+    // Send transaction using walletClient
+    const walletClient = walletProvider;
+    const txHash = await walletClient.sendTransaction({
       to: this.contractAddress,
       data: data,
       value: totalValue,
+      chain: walletClient.chain,
+      account: walletClient.account!,
     });
 
     console.log(`✅ Transaction sent: ${txHash}`);
@@ -313,10 +316,13 @@ export class Prophesier {
       args: [BigInt(onchainTokenId), wasCorrect, BigInt(accuracyScore)]
     });
 
-    // Send transaction
-    const txHash = await walletProvider.sendTransaction({
+    // Send transaction using walletClient
+    const walletClient = walletProvider;
+    const txHash = await walletClient.sendTransaction({
       to: this.contractAddress,
       data: data,
+      chain: walletClient.chain,
+      account: walletClient.account!,
     });
 
     console.log(`✅ Prophecy resolved! TX: ${txHash}`);

@@ -576,6 +576,415 @@ export class YieldOptimizer {
   private savePositions(): void {
     // Would save to file/database in production
   }
+
+  // ==========================================
+  // PHASE 1 & 2: EXIT & SWAP METHODS
+  // ==========================================
+
+  /**
+   * Withdraw tokens from Aave V3
+   * @param token - Token address to withdraw (or 'WETH', 'USDC' as shorthand)
+   * @param amount - Amount to withdraw (or 'all' for full withdrawal)
+   */
+  async withdrawFromAave(token: string, amount?: string): Promise<{
+    success: boolean;
+    txHash?: string;
+    amountWithdrawn?: string;
+    tokenSymbol?: string;
+    error?: string;
+  }> {
+    if (!this.aave) {
+      return { success: false, error: 'Aave not initialized' };
+    }
+    if (!this.wallet) {
+      return { success: false, error: 'Wallet not initialized' };
+    }
+
+    try {
+      // Resolve token address
+      const nid = await this.wallet.getNetworkId();
+      const TOKENS = nid === 'base-mainnet' ? BASE_TOKENS : SEPOLIA_TOKENS;
+      
+      let tokenAddress: string;
+      let tokenSymbol: string;
+      
+      if (token.toUpperCase() === 'WETH') {
+        tokenAddress = TOKENS.WETH;
+        tokenSymbol = 'WETH';
+      } else if (token.toUpperCase() === 'USDC') {
+        tokenAddress = TOKENS.USDC;
+        tokenSymbol = 'USDC';
+      } else {
+        tokenAddress = token;
+        tokenSymbol = 'TOKEN';
+      }
+
+      // Get wallet address for account data
+      const walletAddress = await this.wallet.getAddress();
+      
+      // Get current position to determine amount (optional check)
+      try {
+        await this.aave.getUserAccountData(walletAddress as `0x${string}`);
+      } catch (e) {
+        // Continue even if we can't get account data
+      }
+      
+      // Determine withdrawal amount
+      let withdrawAmount: bigint;
+      if (amount === 'all' || !amount) {
+        // Withdraw all - use max uint256
+        withdrawAmount = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+        console.log(`🏦 Withdrawing ALL ${tokenSymbol} from Aave...`);
+      } else {
+        const decimals = tokenSymbol === 'USDC' ? 6 : 18;
+        withdrawAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** decimals)));
+        console.log(`🏦 Withdrawing ${amount} ${tokenSymbol} from Aave...`);
+      }
+
+      // Execute withdrawal
+      const hash = await this.aave.withdraw(
+        tokenAddress as `0x${string}`,
+        withdrawAmount
+      );
+
+      console.log(`✅ Aave Withdraw TX: ${hash}`);
+
+      // Update positions
+      this.positions = this.positions.filter(p => p.tokenAddress !== tokenAddress);
+      this.savePositions();
+
+      return {
+        success: true,
+        txHash: hash,
+        amountWithdrawn: amount || 'all',
+        tokenSymbol,
+      };
+    } catch (error: any) {
+      console.error('❌ Aave withdrawal failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Universal token swap - swap any token pair via Uniswap V3
+   * Handles ETH wrapping/unwrapping automatically
+   */
+  async swapTokens(params: {
+    tokenIn: string;   // Token address, 'ETH', 'WETH', or 'USDC'
+    tokenOut: string;  // Token address, 'ETH', 'WETH', or 'USDC'
+    amount: string;    // Human-readable amount
+    slippage?: number; // Default 1%
+  }): Promise<{
+    success: boolean;
+    txHash?: string;
+    tokenIn?: string;
+    tokenOut?: string;
+    amountIn?: string;
+    amountOut?: string;
+    error?: string;
+  }> {
+    if (!this.uniswap) {
+      return { success: false, error: 'Uniswap not initialized' };
+    }
+    if (!this.wallet) {
+      return { success: false, error: 'Wallet not initialized' };
+    }
+
+    try {
+      const nid = await this.wallet.getNetworkId();
+      const TOKENS = nid === 'base-mainnet' ? BASE_TOKENS : SEPOLIA_TOKENS;
+      
+      // Resolve token addresses
+      const resolveToken = (t: string): string => {
+        if (t.toUpperCase() === 'ETH') return 'ETH';
+        if (t.toUpperCase() === 'WETH') return TOKENS.WETH;
+        if (t.toUpperCase() === 'USDC') return TOKENS.USDC;
+        return t; // Assume it's already an address
+      };
+
+      const tokenInResolved = resolveToken(params.tokenIn);
+      const tokenOutResolved = resolveToken(params.tokenOut);
+
+      console.log(`💱 Swapping ${params.amount} ${params.tokenIn} → ${params.tokenOut}...`);
+
+      // Handle special cases
+      
+      // Case 1: ETH → WETH (wrap)
+      if (tokenInResolved === 'ETH' && tokenOutResolved === TOKENS.WETH) {
+        const result = await this.uniswap.wrapEth(params.amount);
+        return {
+          success: true,
+          txHash: result.hash,
+          tokenIn: 'ETH',
+          tokenOut: 'WETH',
+          amountIn: params.amount,
+          amountOut: params.amount,
+        };
+      }
+
+      // Case 2: WETH → ETH (unwrap)
+      if (tokenInResolved === TOKENS.WETH && tokenOutResolved === 'ETH') {
+        const result = await this.uniswap.unwrapWeth(params.amount);
+        return {
+          success: true,
+          txHash: result.hash,
+          tokenIn: 'WETH',
+          tokenOut: 'ETH',
+          amountIn: params.amount,
+          amountOut: params.amount,
+        };
+      }
+
+      // Case 3: ETH → Token (wrap then swap)
+      if (tokenInResolved === 'ETH') {
+        console.log('  Step 1: Wrapping ETH to WETH...');
+        await this.uniswap.wrapEth(params.amount);
+        
+        console.log('  Step 2: Swapping WETH to token...');
+        const result = await this.uniswap.swap({
+          tokenIn: TOKENS.WETH as `0x${string}`,
+          tokenOut: tokenOutResolved as `0x${string}`,
+          amountIn: parseEther(params.amount),
+          slippagePercent: params.slippage || 1,
+        });
+        
+        return {
+          success: true,
+          txHash: result.hash,
+          tokenIn: 'ETH',
+          tokenOut: params.tokenOut,
+          amountIn: params.amount,
+          amountOut: formatUnits(result.amountOut, 6), // Assume 6 decimals for output
+        };
+      }
+
+      // Case 4: Token → ETH (swap then unwrap)
+      if (tokenOutResolved === 'ETH') {
+        console.log('  Step 1: Swapping token to WETH...');
+        const decimals = params.tokenIn.toUpperCase() === 'USDC' ? 6 : 18;
+        const amountIn = BigInt(Math.floor(parseFloat(params.amount) * (10 ** decimals)));
+        
+        const swapResult = await this.uniswap.swap({
+          tokenIn: tokenInResolved as `0x${string}`,
+          tokenOut: TOKENS.WETH as `0x${string}`,
+          amountIn: amountIn,
+          slippagePercent: params.slippage || 1,
+        });
+        
+        console.log('  Step 2: Unwrapping WETH to ETH...');
+        const wethAmount = formatUnits(swapResult.amountOut, 18);
+        const unwrapResult = await this.uniswap.unwrapWeth(wethAmount);
+        
+        return {
+          success: true,
+          txHash: unwrapResult.hash,
+          tokenIn: params.tokenIn,
+          tokenOut: 'ETH',
+          amountIn: params.amount,
+          amountOut: wethAmount,
+        };
+      }
+
+      // Case 5: Token → Token (direct Uniswap swap)
+      const decimalsIn = params.tokenIn.toUpperCase() === 'USDC' ? 6 : 18;
+      const decimalsOut = params.tokenOut.toUpperCase() === 'USDC' ? 6 : 18;
+      const amountIn = BigInt(Math.floor(parseFloat(params.amount) * (10 ** decimalsIn)));
+      
+      const result = await this.uniswap.swap({
+        tokenIn: tokenInResolved as `0x${string}`,
+        tokenOut: tokenOutResolved as `0x${string}`,
+        amountIn: amountIn,
+        slippagePercent: params.slippage || 1,
+      });
+
+      return {
+        success: true,
+        txHash: result.hash,
+        tokenIn: params.tokenIn,
+        tokenOut: params.tokenOut,
+        amountIn: params.amount,
+        amountOut: formatUnits(result.amountOut, decimalsOut),
+      };
+    } catch (error: any) {
+      console.error('❌ Swap failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Supply any token to Aave V3
+   * @param token - Token address or symbol (WETH, USDC)
+   * @param amount - Human-readable amount to supply
+   */
+  async supplyToAave(token: string, amount: string): Promise<{
+    success: boolean;
+    txHash?: string;
+    tokenSymbol?: string;
+    amountSupplied?: string;
+    apy?: number;
+    error?: string;
+  }> {
+    if (!this.aave) {
+      return { success: false, error: 'Aave not initialized' };
+    }
+    if (!this.wallet) {
+      return { success: false, error: 'Wallet not initialized' };
+    }
+
+    try {
+      const nid = await this.wallet.getNetworkId();
+      const TOKENS = nid === 'base-mainnet' ? BASE_TOKENS : SEPOLIA_TOKENS;
+      
+      // Resolve token
+      let tokenAddress: string;
+      let tokenSymbol: string;
+      let decimals: number;
+      
+      if (token.toUpperCase() === 'WETH') {
+        tokenAddress = TOKENS.WETH;
+        tokenSymbol = 'WETH';
+        decimals = 18;
+      } else if (token.toUpperCase() === 'USDC') {
+        tokenAddress = TOKENS.USDC;
+        tokenSymbol = 'USDC';
+        decimals = 6;
+      } else {
+        tokenAddress = token;
+        tokenSymbol = 'TOKEN';
+        decimals = 18; // Default
+      }
+
+      console.log(`🏦 Supplying ${amount} ${tokenSymbol} to Aave V3...`);
+
+      const supplyAmount = BigInt(Math.floor(parseFloat(amount) * (10 ** decimals)));
+      const hash = await this.aave.supply(tokenAddress as `0x${string}`, supplyAmount);
+
+      console.log(`✅ Aave Supply TX: ${hash}`);
+
+      // Update positions (get current APY)
+      const apy = 2.0; // Would fetch from Aave in production
+      this.positions.push({
+        protocol: 'Aave V3',
+        strategy: `${tokenSymbol} Supply`,
+        amount: parseFloat(amount),
+        apy: apy,
+        earned: 0,
+        entryTime: Date.now(),
+        tokenAddress: tokenAddress,
+      });
+      this.savePositions();
+
+      return {
+        success: true,
+        txHash: hash,
+        tokenSymbol,
+        amountSupplied: amount,
+        apy,
+      };
+    } catch (error: any) {
+      console.error('❌ Aave supply failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Find the best yield opportunity and enter automatically
+   * Scans all available Aave markets and picks the best APY
+   */
+  async findBestOpportunityAndEnter(params: {
+    amountEth: string;
+    minApy?: number;
+  }): Promise<{
+    success: boolean;
+    opportunity?: YieldOpportunity;
+    swapTx?: string;
+    supplyTx?: string;
+    tokenUsed?: string;
+    amountSupplied?: string;
+    expectedApy?: number;
+    error?: string;
+  }> {
+    if (!this.aave || !this.uniswap || !this.wallet) {
+      return { success: false, error: 'Not fully initialized' };
+    }
+
+    try {
+      console.log(`🔍 Finding best yield opportunity for ${params.amountEth} ETH...`);
+      
+      // Scan opportunities
+      const opportunities = await this.scanOpportunities();
+      const minApy = params.minApy || 1.0;
+      
+      // Filter by minimum APY and sort by highest APY
+      const validOpps = opportunities
+        .filter(o => o.apy >= minApy)
+        .sort((a, b) => b.apy - a.apy);
+
+      if (validOpps.length === 0) {
+        return { 
+          success: false, 
+          error: `No opportunities found with APY >= ${minApy}%` 
+        };
+      }
+
+      const bestOpp = validOpps[0];
+      console.log(`📈 Best opportunity: ${bestOpp.protocol} ${bestOpp.strategy} @ ${bestOpp.apy}% APY`);
+
+      // Execute the entry
+      const nid = await this.wallet.getNetworkId();
+      const TOKENS = nid === 'base-mainnet' ? BASE_TOKENS : SEPOLIA_TOKENS;
+      
+      // If WETH is best, just wrap and supply
+      if (bestOpp.token === 'WETH' || bestOpp.tokenAddress === TOKENS.WETH) {
+        console.log('  Step 1: Wrapping ETH to WETH...');
+        const wrapResult = await this.uniswap.wrapEth(params.amountEth);
+        
+        console.log('  Step 2: Supplying WETH to Aave...');
+        const supplyResult = await this.supplyToAave('WETH', params.amountEth);
+
+        return {
+          success: true,
+          opportunity: bestOpp,
+          swapTx: wrapResult.hash,
+          supplyTx: supplyResult.txHash,
+          tokenUsed: 'WETH',
+          amountSupplied: params.amountEth,
+          expectedApy: bestOpp.apy,
+        };
+      }
+
+      // Otherwise, swap ETH to the best token and supply
+      console.log(`  Step 1: Swapping ETH to ${bestOpp.token}...`);
+      const swapResult = await this.swapTokens({
+        tokenIn: 'ETH',
+        tokenOut: bestOpp.token,
+        amount: params.amountEth,
+      });
+
+      if (!swapResult.success) {
+        return { success: false, error: `Swap failed: ${swapResult.error}` };
+      }
+
+      console.log(`  Step 2: Supplying ${bestOpp.token} to Aave...`);
+      const supplyResult = await this.supplyToAave(
+        bestOpp.token,
+        swapResult.amountOut || params.amountEth
+      );
+
+      return {
+        success: true,
+        opportunity: bestOpp,
+        swapTx: swapResult.txHash,
+        supplyTx: supplyResult.txHash,
+        tokenUsed: bestOpp.token,
+        amountSupplied: swapResult.amountOut,
+        expectedApy: bestOpp.apy,
+      };
+    } catch (error: any) {
+      console.error('❌ Auto-enter failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 export default YieldOptimizer;

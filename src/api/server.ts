@@ -211,6 +211,263 @@ app.post('/yields/supply-weth', requireSage, async (req: Request, res: Response)
   }
 });
 
+// ============ Full Trading Cycle Endpoints ============
+
+// Universal Token Swap
+// POST /swap { "tokenIn": "ETH", "tokenOut": "USDC", "amount": "0.1", "slippage": 1 }
+app.post('/swap', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { tokenIn, tokenOut, amount, slippage } = req.body;
+    
+    if (!tokenIn || !tokenOut || !amount) {
+      res.status(400).json({ error: 'tokenIn, tokenOut, and amount are required' });
+      return;
+    }
+
+    console.log(`💱 API: Swapping ${amount} ${tokenIn} → ${tokenOut}...`);
+    const result = await sage!.swapTokens({ tokenIn, tokenOut, amount, slippage });
+    
+    if (result.success) {
+      res.json({
+        status: 'success',
+        message: `Swapped ${result.amountIn} ${result.tokenIn} → ${result.amountOut} ${result.tokenOut}`,
+        transaction: {
+          hash: result.txHash,
+          basescanUrl: `https://sepolia.basescan.org/tx/${result.txHash}`
+        },
+        amountIn: result.amountIn,
+        amountOut: result.amountOut
+      });
+    } else {
+      res.status(400).json({ status: 'failed', error: result.error });
+    }
+  } catch (error: any) {
+    console.error('Swap error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Withdraw from Aave
+// POST /yields/withdraw { "token": "WETH", "amount": "0.1" } or { "token": "WETH", "amount": "all" }
+app.post('/yields/withdraw', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { token, amount } = req.body;
+    
+    if (!token) {
+      res.status(400).json({ error: 'token is required (e.g., "WETH" or "USDC")' });
+      return;
+    }
+
+    console.log(`🏦 API: Withdrawing ${amount || 'all'} ${token} from Aave...`);
+    const result = await sage!.withdrawFromAave(token, amount);
+    
+    if (result.success) {
+      res.json({
+        status: 'success',
+        message: `Withdrew ${result.amountWithdrawn} ${result.tokenSymbol} from Aave V3`,
+        transaction: {
+          hash: result.txHash,
+          basescanUrl: `https://sepolia.basescan.org/tx/${result.txHash}`
+        }
+      });
+    } else {
+      res.status(400).json({ status: 'failed', error: result.error });
+    }
+  } catch (error: any) {
+    console.error('Withdraw error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Unwrap WETH to ETH
+// POST /unwrap-weth { "amount": "0.1" }
+app.post('/unwrap-weth', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { amount } = req.body;
+    
+    if (!amount || parseFloat(amount) <= 0) {
+      res.status(400).json({ error: 'amount is required' });
+      return;
+    }
+
+    console.log(`💱 API: Unwrapping ${amount} WETH to ETH...`);
+    const result = await sage!.unwrapWeth(amount);
+    
+    res.json({
+      status: 'success',
+      message: `Unwrapped ${amount} WETH to ETH`,
+      transaction: {
+        hash: result.hash,
+        basescanUrl: `https://sepolia.basescan.org/tx/${result.hash}`
+      }
+    });
+  } catch (error: any) {
+    console.error('Unwrap error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Supply any token to Aave
+// POST /yields/supply { "token": "USDC", "amount": "100" }
+app.post('/yields/supply', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { token, amount } = req.body;
+    
+    if (!token || !amount) {
+      res.status(400).json({ error: 'token and amount are required' });
+      return;
+    }
+
+    console.log(`🏦 API: Supplying ${amount} ${token} to Aave...`);
+    const result = await sage!.supplyToAave(token, amount);
+    
+    if (result.success) {
+      res.json({
+        status: 'success',
+        message: `Supplied ${result.amountSupplied} ${result.tokenSymbol} to Aave V3`,
+        transaction: {
+          hash: result.txHash,
+          basescanUrl: `https://sepolia.basescan.org/tx/${result.txHash}`
+        },
+        apy: result.apy
+      });
+    } else {
+      res.status(400).json({ status: 'failed', error: result.error });
+    }
+  } catch (error: any) {
+    console.error('Supply error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Auto-enter best yield opportunity
+// POST /yields/auto-enter { "amountEth": "0.1", "minApy": 2 }
+app.post('/yields/auto-enter', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { amountEth, minApy } = req.body;
+    
+    if (!amountEth || parseFloat(amountEth) <= 0) {
+      res.status(400).json({ error: 'amountEth is required' });
+      return;
+    }
+
+    console.log(`🤖 API: Auto-entering best opportunity with ${amountEth} ETH...`);
+    const result = await sage!.findBestOpportunityAndEnter({ amountEth, minApy });
+    
+    if (result.success) {
+      res.json({
+        status: 'success',
+        message: `Entered ${result.opportunity?.protocol} ${result.opportunity?.strategy}`,
+        opportunity: result.opportunity,
+        transactions: {
+          swap: result.swapTx ? {
+            hash: result.swapTx,
+            basescanUrl: `https://sepolia.basescan.org/tx/${result.swapTx}`
+          } : null,
+          supply: {
+            hash: result.supplyTx,
+            basescanUrl: `https://sepolia.basescan.org/tx/${result.supplyTx}`
+          }
+        },
+        tokenUsed: result.tokenUsed,
+        amountSupplied: result.amountSupplied,
+        expectedApy: result.expectedApy
+      });
+    } else {
+      res.status(400).json({ status: 'failed', error: result.error });
+    }
+  } catch (error: any) {
+    console.error('Auto-enter error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ Autonomous Trading Cycle ============
+
+// Get current trading strategy
+app.get('/trading/strategy', requireSage, async (_req: Request, res: Response) => {
+  try {
+    const strategy = sage!.getTradingStrategy();
+    res.json({ strategy });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update trading strategy
+// POST /trading/strategy { "takeProfitPercent": 10, "stopLossPercent": 5, "enabled": true }
+app.post('/trading/strategy', requireSage, async (req: Request, res: Response) => {
+  try {
+    const updates = req.body;
+    const strategy = sage!.setTradingStrategy(updates);
+    res.json({ 
+      status: 'success',
+      message: 'Trading strategy updated',
+      strategy 
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Run a complete trading cycle
+// Checks positions for P&L, executes take-profit/stop-loss, finds opportunities
+app.post('/trading/run-cycle', requireSage, async (_req: Request, res: Response) => {
+  try {
+    console.log('🔄 API: Running trading cycle...');
+    const result = await sage!.runTradingCycle();
+    
+    res.json({
+      status: result.success ? 'success' : 'failed',
+      message: `Trading cycle complete: ${result.actions.length} actions`,
+      positionsChecked: result.positionsChecked,
+      opportunitiesScanned: result.opportunitiesScanned,
+      actions: result.actions,
+      error: result.error,
+    });
+  } catch (error: any) {
+    console.error('Trading cycle error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get trading action history
+app.get('/trading/history', requireSage, async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 20;
+    const history = sage!.getTradingHistory(limit);
+    res.json({ history });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Enable/disable autonomous trading
+app.post('/trading/enable', requireSage, async (_req: Request, res: Response) => {
+  try {
+    sage!.enableAutonomousTrading();
+    res.json({ 
+      status: 'success',
+      message: 'Autonomous trading ENABLED',
+      warning: 'The agent will now execute trades automatically on /trading/run-cycle'
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/trading/disable', requireSage, async (_req: Request, res: Response) => {
+  try {
+    sage!.disableAutonomousTrading();
+    res.json({ 
+      status: 'success',
+      message: 'Autonomous trading DISABLED'
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ Reputation ============
 
 app.get('/reputation', requireSage, async (_req: Request, res: Response) => {

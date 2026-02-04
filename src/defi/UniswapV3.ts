@@ -13,6 +13,7 @@ import {
   createPublicClient,
   http,
   parseUnits,
+  formatUnits,
   type Address,
   type Hash,
   type WalletClient,
@@ -521,6 +522,49 @@ export class UniswapV3 {
     // Wait for confirmation
     await this.publicClient.waitForTransactionReceipt({ hash });
     console.log(`✅ Wrap TX: ${hash}`);
+
+    return { hash, amountOut: amount };
+  }
+
+  /**
+   * Unwrap WETH to ETH by withdrawing from the WETH contract
+   * This converts wrapped ETH back to native ETH
+   */
+  async unwrapWeth(amountWeth: string): Promise<{ hash: Hash; amountOut: bigint }> {
+    if (!this.walletClient) throw new Error('Wallet client not set');
+
+    const amount = parseUnits(amountWeth, 18);
+    
+    // Check WETH balance first
+    const wethBalance = await this.getTokenBalance(this.tokens.WETH);
+    if (wethBalance < amount) {
+      throw new Error(`Insufficient WETH balance. Have: ${formatUnits(wethBalance, 18)}, Need: ${amountWeth}`);
+    }
+
+    const WETH_ABI = [
+      {
+        inputs: [{ name: 'wad', type: 'uint256' }],
+        name: 'withdraw',
+        outputs: [],
+        stateMutability: 'nonpayable',
+        type: 'function',
+      },
+    ] as const;
+
+    console.log(`💱 Unwrapping ${amountWeth} WETH to ETH...`);
+    
+    const hash = await this.walletClient.writeContract({
+      address: this.tokens.WETH,
+      abi: WETH_ABI,
+      functionName: 'withdraw',
+      args: [amount],
+      chain: this.network === 'base' ? base : baseSepolia,
+      account: this.walletClient.account!,
+    });
+
+    // Wait for confirmation
+    await this.publicClient.waitForTransactionReceipt({ hash });
+    console.log(`✅ Unwrap TX: ${hash}`);
 
     return { hash, amountOut: amount };
   }

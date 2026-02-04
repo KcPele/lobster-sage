@@ -1,5 +1,10 @@
 import { LobsterSage } from './LobsterSage';
 
+// Prevent crash from unhandled promise rejections (e.g., Coinbase analytics DNS errors)
+process.on('unhandledRejection', (reason, _promise) => {
+  console.warn('⚠️ Unhandled Rejection (non-fatal):', reason);
+});
+
 // Re-export main class
 export { LobsterSage } from './LobsterSage';
 

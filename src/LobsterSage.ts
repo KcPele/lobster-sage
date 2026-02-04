@@ -9,6 +9,7 @@ import { FarcasterClient } from './social/farcaster-client';
 import { contentGenerator } from './social/content-templates';
 import { AaveV3 } from './defi/AaveV3';
 import { UniswapV3 } from './defi/UniswapV3';
+import { TradingStrategyManager, fetchTokenPrices } from './yield/tradingStrategy';
 import { getConfig, Config } from './config';
 import { PortfolioSummary, AutonomousConfig } from './types';
 
@@ -32,6 +33,7 @@ export class LobsterSage {
   private farcaster: FarcasterClient | null = null;
   private aave!: AaveV3;
   private uniswap!: UniswapV3;
+  private tradingStrategy: TradingStrategyManager;
   private config: Config;
   
   private isRunning: boolean = false;
@@ -58,6 +60,14 @@ export class LobsterSage {
       maxSlippage: 0.5,
       riskTolerance: 'moderate',
       rebalanceInterval: this.config.yieldRebalanceInterval * 1000
+    });
+
+    // Initialize trading strategy manager
+    this.tradingStrategy = new TradingStrategyManager({
+      takeProfitPercent: 10,
+      stopLossPercent: 5,
+      minApyThreshold: 2,
+      enabled: false, // Disabled by default for safety
     });
   }
 
@@ -552,6 +562,129 @@ Built on @base with @coinbase AgentKit 🦞`;
    */
   async supplyWethToAave(amountEth: string): Promise<any> {
     return this.yieldOptimizer.supplyWethToAave(amountEth);
+  }
+
+  // ==========================================
+  // FULL TRADING CYCLE METHODS
+  // ==========================================
+
+  /**
+   * Withdraw tokens from Aave V3
+   * @param token - Token to withdraw ('WETH', 'USDC', or address)
+   * @param amount - Amount to withdraw ('all' for full withdrawal)
+   */
+  async withdrawFromAave(token: string, amount?: string): Promise<any> {
+    return this.yieldOptimizer.withdrawFromAave(token, amount);
+  }
+
+  /**
+   * Swap any token pair via Uniswap V3
+   * Handles ETH wrapping/unwrapping automatically
+   */
+  async swapTokens(params: {
+    tokenIn: string;
+    tokenOut: string;
+    amount: string;
+    slippage?: number;
+  }): Promise<any> {
+    return this.yieldOptimizer.swapTokens(params);
+  }
+
+  /**
+   * Supply any token to Aave V3
+   */
+  async supplyToAave(token: string, amount: string): Promise<any> {
+    return this.yieldOptimizer.supplyToAave(token, amount);
+  }
+
+  /**
+   * Find best yield opportunity and enter automatically
+   * Scans all markets and picks the highest APY
+   */
+  async findBestOpportunityAndEnter(params: {
+    amountEth: string;
+    minApy?: number;
+  }): Promise<any> {
+    return this.yieldOptimizer.findBestOpportunityAndEnter(params);
+  }
+
+  /**
+   * Unwrap WETH to ETH
+   */
+  async unwrapWeth(amount: string): Promise<any> {
+    if (!this.uniswap) throw new Error('Uniswap not initialized');
+    return this.uniswap.unwrapWeth(amount);
+  }
+
+  // ==========================================
+  // AUTONOMOUS TRADING CYCLE
+  // ==========================================
+
+  /**
+   * Get current trading strategy
+   */
+  getTradingStrategy(): any {
+    return this.tradingStrategy.getStrategy();
+  }
+
+  /**
+   * Update trading strategy
+   */
+  setTradingStrategy(updates: {
+    takeProfitPercent?: number;
+    stopLossPercent?: number;
+    minApyThreshold?: number;
+    maxPositionSizeEth?: number;
+    enabled?: boolean;
+  }): any {
+    return this.tradingStrategy.setStrategy(updates);
+  }
+
+  /**
+   * Enable autonomous trading
+   */
+  enableAutonomousTrading(): void {
+    this.tradingStrategy.enableAutonomousTrading();
+  }
+
+  /**
+   * Disable autonomous trading
+   */
+  disableAutonomousTrading(): void {
+    this.tradingStrategy.disableAutonomousTrading();
+  }
+
+  /**
+   * Run a complete trading cycle
+   * Checks positions for exit signals, finds opportunities, executes trades
+   */
+  async runTradingCycle(): Promise<any> {
+    // Update prices first
+    const prices = await fetchTokenPrices();
+    this.tradingStrategy.updatePrices(prices);
+
+    return this.tradingStrategy.runTradingCycle({
+      getOpportunities: () => this.yieldOptimizer.scanOpportunities(),
+      exitPosition: async (position) => {
+        const result = await this.withdrawFromAave(position.token);
+        return { success: result.success, txHash: result.txHash };
+      },
+      enterPosition: async (opportunity, amountEth) => {
+        const result = await this.findBestOpportunityAndEnter({ 
+          amountEth, 
+          minApy: opportunity.apy 
+        });
+        return { success: result.success, txHash: result.supplyTx };
+      },
+      updatePrices: fetchTokenPrices,
+    });
+  }
+
+  /**
+   * Get trading action history
+   */
+  getTradingHistory(limit: number = 20): any[] {
+    return this.tradingStrategy.getActionHistory(limit);
   }
 
   /**

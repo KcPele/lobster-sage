@@ -284,6 +284,7 @@ Accuracy score: 75%
 
 **Live Server:** https://lobster.up.railway.app
 
+### Core Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check |
@@ -294,9 +295,32 @@ Accuracy score: 75%
 | `/portfolio` | GET | Holdings and active predictions |
 | `/reputation` | GET | Reputation score breakdown |
 | `/analysis` | GET | Current market analysis |
+
+### DeFi Trading Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/yields` | GET | View yield farming opportunities |
-| `/yields/supply-weth` | POST | **Wrap ETH + supply to Aave V3** (REAL TX!) |
+| `/yields/supply-weth` | POST | Wrap ETH + supply to Aave V3 |
+| `/yields/supply` | POST | **Supply any token to Aave** |
+| `/yields/withdraw` | POST | **Withdraw from Aave** |
+| `/yields/auto-enter` | POST | **Auto-find best yield + enter** |
 | `/yields/positions` | GET | View active yield positions |
+| `/swap` | POST | **Swap any token pair** (ETH↔WETH↔USDC) |
+| `/unwrap-weth` | POST | **Convert WETH back to ETH** |
+
+### Autonomous Trading Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/trading/strategy` | GET | Get current trading strategy |
+| `/trading/strategy` | POST | **Configure take-profit/stop-loss** |
+| `/trading/run-cycle` | POST | **Run complete trading cycle** |
+| `/trading/enable` | POST | Enable autonomous trading |
+| `/trading/disable` | POST | Disable autonomous trading |
+| `/trading/history` | GET | Get trading action history |
+
+### Social Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/farcaster/post` | POST | Post message to Farcaster |
 
 ---

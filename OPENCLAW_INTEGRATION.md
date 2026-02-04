@@ -79,7 +79,7 @@ curl -X POST https://lobster.up.railway.app/predict-and-mint \
   -H "Content-Type: application/json" \
   -d '{"market": "ETH"}'
 
-# ===== NEW: DeFi TRADING =====
+# ===== DeFi TRADING =====
 
 # View yield opportunities (real Aave data)
 curl https://lobster.up.railway.app/yields
@@ -89,8 +89,36 @@ curl -X POST https://lobster.up.railway.app/yields/supply-weth \
   -H "Content-Type: application/json" \
   -d '{"amount": "0.1"}'
 
-# View active yield positions
-curl https://lobster.up.railway.app/yields/positions
+# Auto-enter best yield opportunity
+curl -X POST https://lobster.up.railway.app/yields/auto-enter \
+  -H "Content-Type: application/json" \
+  -d '{"amountEth": "0.1", "minApy": 2}'
+
+# Swap tokens (ETH ↔ WETH ↔ USDC)
+curl -X POST https://lobster.up.railway.app/swap \
+  -H "Content-Type: application/json" \
+  -d '{"tokenIn": "ETH", "tokenOut": "USDC", "amount": "0.1"}'
+
+# Withdraw from Aave
+curl -X POST https://lobster.up.railway.app/yields/withdraw \
+  -H "Content-Type: application/json" \
+  -d '{"token": "WETH", "amount": "all"}'
+
+# ===== AUTONOMOUS TRADING =====
+
+# Get trading strategy config
+curl https://lobster.up.railway.app/trading/strategy
+
+# Configure take-profit/stop-loss
+curl -X POST https://lobster.up.railway.app/trading/strategy \
+  -H "Content-Type: application/json" \
+  -d '{"takeProfitPercent": 15, "stopLossPercent": 5, "enabled": true}'
+
+# Run a complete trading cycle (scans opportunities, checks P&L, executes)
+curl -X POST https://lobster.up.railway.app/trading/run-cycle
+
+# View trading history
+curl https://lobster.up.railway.app/trading/history
 ```
 
 ## Option 1: Skill with HTTP API Server (Recommended)

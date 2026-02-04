@@ -8,10 +8,11 @@ LobsterSage is an **autonomous AI agent** that:
 - Makes crypto market predictions
 - Mints those predictions as NFTs on Base
 - Stakes ETH on its predictions (skin in the game!)
+- **Executes real DeFi trades** (wraps ETH, supplies to Aave V3)
 - Builds reputation based on accuracy
 - Posts transparently to Farcaster
 
-**Key differentiator:** Unlike other agents, LobsterSage **proves its predictions onchain** by minting NFTs and staking real ETH.
+**Key differentiator:** Unlike other agents, LobsterSage **proves its predictions onchain** by minting NFTs, staking real ETH, and executing real DeFi transactions.
 
 ---
 
@@ -134,7 +135,53 @@ Built on @base with @coinbase AgentKit 🦞
 
 ---
 
-## Step 5: Wait for Resolution
+## Step 5: DeFi Trading (REAL ONCHAIN TXs!)
+
+**What happens:**
+LobsterSage can execute real DeFi transactions to optimize yields:
+
+### A. Wrap ETH to WETH
+1. Agent calls WETH contract `deposit()` function
+2. ETH is converted to WETH (wrapped ETH)
+3. WETH can be used in DeFi protocols
+
+### B. Supply to Aave V3
+1. Agent approves WETH for Aave pool
+2. Calls `supply()` on Aave V3 Pool contract
+3. WETH is deposited, earning yield
+
+**API Endpoint:**
+```bash
+curl -X POST https://lobster.up.railway.app/yields/supply-weth \
+  -H "Content-Type: application/json" \
+  -d '{"amount": "0.1"}'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Successfully supplied 0.1 WETH to Aave V3",
+  "wrapTransaction": {
+    "hash": "0xde2753bb95da7dbacc356841eaa88a47edfe7a42ecddd28ce53a7719cc9cb590",
+    "basescanUrl": "https://sepolia.basescan.org/tx/0xde27..."
+  },
+  "supplyTransaction": {
+    "hash": "0xbbbdcee00ec4e5a4154538acf20c6dae840fc3dd3cf3df72186138320d2cf231",
+    "basescanUrl": "https://sepolia.basescan.org/tx/0xbbbd..."
+  }
+}
+```
+
+**Contracts Used:**
+| Contract | Address | Function |
+|----------|---------|----------|
+| WETH | `0x4200000000000000000000000000000000000006` | `deposit()` |
+| Aave V3 Pool | `0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27` | `supply()` |
+
+---
+
+## Step 6: Wait for Resolution
 
 **What happens:**
 - Prediction has a `resolvesAt` timestamp
@@ -145,7 +192,7 @@ Built on @base with @coinbase AgentKit 🦞
 
 ---
 
-## Step 6: Resolve Prediction
+## Step 7: Resolve Prediction
 
 **What happens when timeframe ends:**
 
@@ -247,6 +294,9 @@ Accuracy score: 75%
 | `/portfolio` | GET | Holdings and active predictions |
 | `/reputation` | GET | Reputation score breakdown |
 | `/analysis` | GET | Current market analysis |
+| `/yields` | GET | View yield farming opportunities |
+| `/yields/supply-weth` | POST | **Wrap ETH + supply to Aave V3** (REAL TX!) |
+| `/yields/positions` | GET | View active yield positions |
 | `/farcaster/post` | POST | Post message to Farcaster |
 
 ---

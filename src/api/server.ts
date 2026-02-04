@@ -13,6 +13,17 @@ const app: Application = express();
 app.use(cors());
 app.use(express.json());
 
+// Prevent crashes from background analytics errors (AgentKit)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️  Unhandled Rejection:', reason);
+  // Do not exit process
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('⚠️  Uncaught Exception:', error);
+  // Do not exit process
+});
+
 let sage: LobsterSage | null = null;
 let isInitializing = false;
 
@@ -157,6 +168,45 @@ app.get('/yields/positions', requireSage, async (_req: Request, res: Response) =
     const positions = await sage!.getYieldPositions();
     res.json({ positions });
   } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Supply WETH to Aave - Direct, reliable yield farming
+// POST /yields/supply-weth { "amount": "0.1" }
+app.post('/yields/supply-weth', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { amount } = req.body;
+    
+    if (!amount || parseFloat(amount) <= 0) {
+      res.status(400).json({ error: 'amount is required (e.g., "0.1" for 0.1 ETH)' });
+      return;
+    }
+
+    console.log(`🏦 API: Supply ${amount} ETH as WETH to Aave...`);
+    const result = await sage!.supplyWethToAave(amount);
+    
+    if (result.success) {
+      res.json({
+        status: 'success',
+        message: `Successfully supplied ${result.amountSupplied} WETH to Aave V3`,
+        wrapTransaction: {
+          hash: result.wrapTxHash,
+          basescanUrl: `https://sepolia.basescan.org/tx/${result.wrapTxHash}`
+        },
+        supplyTransaction: {
+          hash: result.supplyTxHash,
+          basescanUrl: `https://sepolia.basescan.org/tx/${result.supplyTxHash}`
+        }
+      });
+    } else {
+      res.status(400).json({ 
+        status: 'failed',
+        error: result.error 
+      });
+    }
+  } catch (error: any) {
+    console.error('Supply WETH error:', error);
     res.status(500).json({ error: error.message });
   }
 });

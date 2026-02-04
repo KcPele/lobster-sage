@@ -42,6 +42,8 @@ export class WalletManager {
   private networkId: string;
   private isInitialized = false;
   private walletAddress: string = '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private walletClient: any = null;
 
   constructor(config?: WalletConfig) {
     this.networkId = config?.networkId || process.env.NETWORK_ID || 'base-sepolia';
@@ -113,6 +115,7 @@ export class WalletManager {
         // Use type cast to avoid version incompatibility issues
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.walletProvider = new ViemWalletProvider(walletClient as any);
+        this.walletClient = walletClient;
         this.walletAddress = account.address;
         this.isInitialized = true;
         
@@ -165,11 +168,18 @@ export class WalletManager {
   }
 
   /**
-   * Get token balance
+   * Get network ID
    */
-  async getTokenBalance(tokenAddress: string): Promise<string> {
+  getNetworkId(): string {
+    return this.networkId;
+  }
+
+  /**
+   * Get raw token balance with decimals
+   */
+  async getTokenBalanceRaw(tokenAddress: string): Promise<{ value: bigint, decimals: number }> {
     if (!this.publicClient || !this.walletAddress) {
-      return '0';
+      return { value: 0n, decimals: 18 };
     }
 
     try {
@@ -205,11 +215,19 @@ export class WalletManager {
         }),
       ]);
 
-      return ethers.formatUnits(balance, decimals);
+      return { value: balance, decimals };
     } catch (error) {
       console.error(`Failed to get token balance for ${tokenAddress}:`, error);
-      return '0';
+      return { value: 0n, decimals: 18 };
     }
+  }
+
+  /**
+   * Get token balance (formatted)
+   */
+  async getTokenBalance(tokenAddress: string): Promise<string> {
+    const raw = await this.getTokenBalanceRaw(tokenAddress);
+    return ethers.formatUnits(raw.value, raw.decimals);
   }
 
   /**
@@ -247,6 +265,14 @@ export class WalletManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getWalletProvider(): any {
     return this.walletProvider;
+  }
+
+  /**
+   * Get the underlying viem wallet client (if available)
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getWalletClient(): any {
+    return this.walletClient;
   }
 
   /**

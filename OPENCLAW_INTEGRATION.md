@@ -13,6 +13,7 @@ This guide explains how to integrate LobsterSage as an OpenClaw skill for the **
 **LobsterSage API just executes** - it handles:
 - Making predictions
 - Minting NFTs onchain (REAL transactions!)
+- **Real DeFi trading** (wrap ETH, supply to Aave V3)
 - Querying portfolio/reputation
 - Interacting with Base blockchain
 
@@ -40,10 +41,12 @@ This guide explains how to integrate LobsterSage as an OpenClaw skill for the **
 │  ┌───────────────────────────────────────────────────────────────────┐   │
 │  │              LobsterSage API (Railway - EXECUTOR)                  │   │
 │  │                                                                    │   │
-│  │   POST /predict-and-mint  → Mint NFT onchain (0.011 ETH)          │   │
-│  │   GET  /status            → Wallet balance, address                │   │
-│  │   GET  /portfolio         → Holdings, predictions                  │   │
-│  │   GET  /reputation        → Accuracy score                         │   │
+│  │   POST /predict-and-mint     → Mint NFT onchain (0.011 ETH)       │   │
+│  │   POST /yields/supply-weth   → Wrap ETH + supply to Aave V3       │   │
+│  │   GET  /status               → Wallet balance, address             │   │
+│  │   GET  /portfolio            → Holdings, predictions               │   │
+│  │   GET  /reputation           → Accuracy score                      │   │
+│  │   GET  /yields               → DeFi yield opportunities            │   │
 │  └────────────────────────────────┬──────────────────────────────────┘   │
 │                                   │                                       │
 │                                   ▼                                       │
@@ -52,7 +55,9 @@ This guide explains how to integrate LobsterSage as an OpenClaw skill for the **
 │  │                                                                    │   │
 │  │  ProphecyNFT: 0xa358df3fea45be4f23825b8074e156c55a1cfda2          │   │
 │  │  Reputation:  0x17ccdc2dfa3f8297048d16ef069cb3c77030bb32          │   │
-│  │  CDP Wallet:  0xD7476C17Cfd60f67bdB15B235EeD963DaFAB9353          │   │
+│  │  Aave V3:     0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27          │   │
+│  │  WETH:        0x4200000000000000000000000000000000000006          │   │
+│  │  Agent Wallet: 0xf4030DdD79fc7Fd49b25C976C5021D07568B4F91         │   │
 │  └───────────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -73,6 +78,19 @@ curl https://lobster.up.railway.app/status
 curl -X POST https://lobster.up.railway.app/predict-and-mint \
   -H "Content-Type: application/json" \
   -d '{"market": "ETH"}'
+
+# ===== NEW: DeFi TRADING =====
+
+# View yield opportunities (real Aave data)
+curl https://lobster.up.railway.app/yields
+
+# Supply WETH to Aave V3 (REAL TXs: wrap + supply)
+curl -X POST https://lobster.up.railway.app/yields/supply-weth \
+  -H "Content-Type: application/json" \
+  -d '{"amount": "0.1"}'
+
+# View active yield positions
+curl https://lobster.up.railway.app/yields/positions
 ```
 
 ## Option 1: Skill with HTTP API Server (Recommended)
@@ -259,6 +277,18 @@ curl -s -X POST https://lobster.up.railway.app/yields/optimize
 curl -s https://lobster.up.railway.app/reputation
 ```
 
+**Supply WETH to Aave (DeFi Trading):**
+```bash
+curl -s -X POST https://lobster.up.railway.app/yields/supply-weth \
+  -H "Content-Type: application/json" \
+  -d '{"amount": "0.1"}'
+```
+
+**View Yield Positions:**
+```bash
+curl -s https://lobster.up.railway.app/yields/positions
+```
+
 ## Response Formatting
 
 Always format responses in a friendly, engaging way:
@@ -282,13 +312,13 @@ User: "Find me good yields"
 → Execute: `curl -s https://lobster.up.railway.app/yields`
 → List opportunities sorted by APY
 
-## Autonomous Mode
+User: "Deposit 0.1 ETH to Aave"
+→ Execute: `curl -s -X POST https://lobster.up.railway.app/yields/supply-weth -H "Content-Type: application/json" -d '{"amount": "0.1"}'`
+→ Show the two transaction hashes (wrap + supply)
 
-When asked to run autonomously, explain that LobsterSage will:
-1. Scan markets every 6 hours for prediction opportunities
-2. Rebalance yields every hour
-3. Post updates to social media
-4. Build reputation through accurate predictions
+User: "Show my yield positions"
+→ Execute: `curl -s https://lobster.up.railway.app/yields/positions`
+→ Display active DeFi positions with APY
 ```
 
 ### Step 4: Configure OpenClaw to Use the Skill
@@ -482,6 +512,36 @@ export default function (api: any) {
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     },
   });
+
+  // Supply WETH to Aave - DeFi Trading tool
+  api.registerTool({
+    name: "lobster_supply_weth",
+    description: "Supply WETH to Aave V3 for yield farming. Wraps ETH to WETH and deposits to Aave.",
+    parameters: Type.Object({
+      amount: Type.String({ description: "Amount of ETH to wrap and supply (e.g., '0.1')" }),
+    }),
+    async execute(_id: string, params: { amount: string }) {
+      const response = await fetch('https://lobster.up.railway.app/yields/supply-weth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: params.amount }),
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    },
+  });
+
+  // Get yield positions tool
+  api.registerTool({
+    name: "lobster_positions",
+    description: "Get active DeFi yield positions",
+    parameters: Type.Object({}),
+    async execute() {
+      const response = await fetch('https://lobster.up.railway.app/yields/positions');
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    },
+  });
 }
 ```
 
@@ -510,7 +570,9 @@ Add to `~/.openclaw/openclaw.json`:
             "lobster_portfolio",
             "lobster_predict", 
             "lobster_yields",
-            "lobster_reputation"
+            "lobster_reputation",
+            "lobster_supply_weth",  // NEW: DeFi trading
+            "lobster_positions"     // NEW: View positions
           ]
         }
       }
@@ -548,9 +610,26 @@ Bot: 🔮 LobsterSage Prediction
 
 You: Find yield opportunities
 Bot: 🌾 Best Yields on Base
-     1. Aave USDC: 8.2% APY
-     2. Uniswap ETH/USDC: 15.4% APY
-     3. Compound USDC: 7.8% APY
+     1. Aave WETH Supply: 2.1% APY (low risk)
+     2. Aave USDC Supply: 4.2% APY (low risk)
+     
+You: Deposit 0.1 ETH to Aave
+Bot: 🏦 Executing DeFi Trade...
+     
+     ✅ Step 1: Wrapped 0.1 ETH → WETH
+     TX: https://sepolia.basescan.org/tx/0xde27...
+     
+     ✅ Step 2: Supplied WETH to Aave V3
+     TX: https://sepolia.basescan.org/tx/0xbbbd...
+     
+     🎉 Now earning 2.1% APY on 0.1 WETH!
+
+You: Show my positions
+Bot: 📊 Active Yield Positions
+     1. Aave V3 - WETH Supply
+        Amount: 0.1 WETH
+        APY: 2.1%
+        Earning: ~0.0021 WETH/year
 ```
 
 ---

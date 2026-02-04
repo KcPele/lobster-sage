@@ -127,8 +127,8 @@ export const AAVE_ADDRESSES = {
     rewardsController: '0xf9cc4F0D883F4379D0d4F4667FE33898eADf6ad7' as Address,
   },
   baseSepolia: {
-    pool: '0x07eA79F68E2c3eF5D64238e7Ce8dba05446D57e3' as Address,
-    poolDataProvider: '0xB4705f9F460Eb315468034d07986C1aAF71430be' as Address,
+    pool: '0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27' as Address,
+    poolDataProvider: '0xa69D14FB5819297C3824a36a7C3b813Ab625B4Aa' as Address,
     rewardsController: '0x0000000000000000000000000000000000000000' as Address,
   },
 };

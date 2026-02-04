@@ -487,6 +487,43 @@ export class UniswapV3 {
   getRouterAddress(): Address {
     return this.addresses.swapRouter02;
   }
+
+  /**
+   * Wrap ETH to WETH by directly depositing to the WETH contract
+   * This is the most gas-efficient way to get WETH
+   */
+  async wrapEth(amountEth: string): Promise<{ hash: Hash; amountOut: bigint }> {
+    if (!this.walletClient) throw new Error('Wallet client not set');
+
+    const amount = parseUnits(amountEth, 18);
+    const WETH_ABI = [
+      {
+        inputs: [],
+        name: 'deposit',
+        outputs: [],
+        stateMutability: 'payable',
+        type: 'function',
+      },
+    ] as const;
+
+    console.log(`💱 Wrapping ${amountEth} ETH to WETH...`);
+    
+    const hash = await this.walletClient.writeContract({
+      address: this.tokens.WETH,
+      abi: WETH_ABI,
+      functionName: 'deposit',
+      args: [],
+      value: amount,
+      chain: this.network === 'base' ? base : baseSepolia,
+      account: this.walletClient.account!,
+    });
+
+    // Wait for confirmation
+    await this.publicClient.waitForTransactionReceipt({ hash });
+    console.log(`✅ Wrap TX: ${hash}`);
+
+    return { hash, amountOut: amount };
+  }
 }
 
 // ============ Singleton Export ============

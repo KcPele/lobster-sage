@@ -8,6 +8,7 @@ import { TwitterClient } from './social/twitter-client';
 import { FarcasterClient } from './social/farcaster-client';
 import { contentGenerator } from './social/content-templates';
 import { AaveV3 } from './defi/AaveV3';
+import { UniswapV3 } from './defi/UniswapV3';
 import { getConfig, Config } from './config';
 import { PortfolioSummary, AutonomousConfig } from './types';
 
@@ -30,6 +31,7 @@ export class LobsterSage {
   private twitter: TwitterClient | null = null;
   private farcaster: FarcasterClient | null = null;
   private aave!: AaveV3;
+  private uniswap!: UniswapV3;
   private config: Config;
   
   private isRunning: boolean = false;
@@ -88,6 +90,25 @@ export class LobsterSage {
     // Initialize AaveV3 (reuse network variable from above)
     this.aave = new AaveV3(network);
     
+    // Initialize UniswapV3
+    this.uniswap = new UniswapV3(network);
+    
+    // Attempt to connect wallet client to DeFi modules
+    try {
+      const walletClient = this.wallet.getWalletClient();
+      
+      if (walletClient) {
+        console.log('🔗 Connecting Wallet Client to DeFi modules...');
+        this.aave.setWalletClient(walletClient);
+        this.uniswap.setWalletClient(walletClient);
+      } else {
+        console.warn('⚠️  No direct WalletClient available (CDP mode active). DeFi execution will be READ-ONLY.');
+        console.warn('    To enable execution (Aave/Uniswap), ensure PRIVATE_KEY fallback is active or use a supported wallet provider.');
+      }
+    } catch (err) {
+      console.warn('⚠️  Could not attach wallet client to DeFi modules:', err);
+    }
+    
     // Initialize social clients if configured
     if (this.config.twitterEnabled && process.env.TWITTER_API_KEY) {
       this.twitter = new TwitterClient({
@@ -106,7 +127,7 @@ export class LobsterSage {
     }
     
     // Initialize yield optimizer with AaveV3 for real DeFi interactions
-    await this.yieldOptimizer.initialize(this.wallet, this.aave);
+    await this.yieldOptimizer.initialize(this.wallet, this.aave, this.uniswap);
     
     const address = await this.wallet.getAddress();
     const balance = await this.wallet.getBalance();
@@ -523,6 +544,14 @@ Built on @base with @coinbase AgentKit 🦞`;
    */
   async getYieldPositions(): Promise<any[]> {
     return this.yieldOptimizer.getPositions();
+  }
+
+  /**
+   * Supply WETH to Aave V3 - wraps ETH and deposits to Aave
+   * This is the most reliable yield farming approach that works on both testnet and mainnet
+   */
+  async supplyWethToAave(amountEth: string): Promise<any> {
+    return this.yieldOptimizer.supplyWethToAave(amountEth);
   }
 
   /**

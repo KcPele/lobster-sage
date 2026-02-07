@@ -1040,6 +1040,35 @@ Built on @base with @coinbase AgentKit 🦞
   }
 
   /**
+   * Run pure DeFi trading cycle WITHOUT NFT minting
+   * This is for competition mode - shows real trading activity only
+   */
+  async runPureTradingCycle(): Promise<any> {
+    console.log('💰 STARTING PURE DEFI TRADING CYCLE (no NFTs)');
+
+    // Update prices first
+    const prices = await fetchTokenPrices();
+    this.tradingStrategy.updatePrices(prices);
+
+    // Run the trading strategy with real DeFi transactions
+    return this.tradingStrategy.runTradingCycle({
+      getOpportunities: () => this.yieldOptimizer.scanOpportunities(),
+      exitPosition: async (position) => {
+        const result = await this.withdrawFromAave(position.token);
+        return { success: result.success, txHash: result.txHash };
+      },
+      enterPosition: async (opportunity, amountEth) => {
+        const result = await this.findBestOpportunityAndEnter({ 
+          amountEth, 
+          minApy: opportunity.apy 
+        });
+        return { success: result.success, txHash: result.supplyTx };
+      },
+      updatePrices: fetchTokenPrices,
+    });
+  }
+
+  /**
    * Get trading action history
    */
   getTradingHistory(limit: number = 20): any[] {

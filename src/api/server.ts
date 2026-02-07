@@ -540,7 +540,7 @@ app.post('/trading/run-cycle', requireSage, async (_req: Request, res: Response)
   try {
     console.log('🔄 API: Running trading cycle...');
     const result = await sage!.runTradingCycle();
-    
+
     res.json({
       status: result.success ? 'success' : 'failed',
       message: `Trading cycle complete: ${result.actions.length} actions`,
@@ -551,6 +551,28 @@ app.post('/trading/run-cycle', requireSage, async (_req: Request, res: Response)
     });
   } catch (error: any) {
     console.error('Trading cycle error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Run pure DeFi trading cycle WITHOUT NFT minting
+// For competition mode - shows only real trading (swaps, Aave supplies)
+app.post('/trading/pure-cycle', requireSage, async (_req: Request, res: Response) => {
+  try {
+    console.log('💰 API: Running pure DeFi trading cycle (no NFTs)...');
+    const result = await sage!.runPureTradingCycle();
+
+    res.json({
+      status: result.success ? 'success' : 'failed',
+      message: `Pure trading cycle complete: ${result.actions.length} actions`,
+      positionsChecked: result.positionsChecked,
+      opportunitiesScanned: result.opportunitiesScanned,
+      actions: result.actions,
+      note: 'No NFTs minted - pure DeFi trading only',
+      error: result.error,
+    });
+  } catch (error: any) {
+    console.error('Pure trading cycle error:', error);
     res.status(500).json({ error: error.message });
   }
 });

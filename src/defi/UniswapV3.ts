@@ -29,9 +29,9 @@ export const UNISWAP_ADDRESSES = {
     factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD' as Address,
   },
   baseSepolia: {
-    // Sepolia testnet addresses (may differ)
+    // Sepolia testnet addresses from https://docs.base.org/base-chain/network-information/ecosystem-contracts
     swapRouter02: '0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4' as Address,
-    quoterV2: '0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3' as Address,
+    quoterV2: '0xC5290058841028F1614F3A6F0F5816cAd0df5E27' as Address,
     factory: '0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24' as Address,
   },
 };

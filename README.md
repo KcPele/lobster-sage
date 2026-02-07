@@ -140,6 +140,11 @@ lobster-sage/
 CDP_API_KEY_NAME=your_key_name
 CDP_API_KEY_PRIVATE_KEY=your_private_key
 
+# Dune Analytics (Optional)
+# Note: Custom SQL queries require a specific Dune plan layer.
+# Free API keys may result in 403 errors and fallback to mock data.
+DUNE_API_KEY=your_dune_key
+
 # Network (base-sepolia or base-mainnet)
 NETWORK_ID=base-sepolia
 

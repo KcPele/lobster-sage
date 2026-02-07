@@ -124,8 +124,11 @@ curl https://lobster.up.railway.app/trading/capitulation-check
  
 # Run a complete trading cycle (scans opportunities, checks P&L, executes)
 curl -X POST https://lobster.up.railway.app/trading/run-cycle
+
+# Run pure DeFi cycle (No NFTs - Competition Mode)
+curl -X POST https://lobster.up.railway.app/trading/pure-cycle
  
-# View history
+# View trading history
 curl https://lobster.up.railway.app/trading/history
 
 

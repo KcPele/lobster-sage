@@ -384,6 +384,22 @@ Built on @base with @coinbase AgentKit 🦞
   }
 
   /**
+   * Get market sentiment for analysis
+   */
+  async getMarketSentiment(): Promise<{
+    score: number;
+    fearGreedIndex: number;
+    socialVolume: number;
+  }> {
+    const sentiment = await this.analytics.analyzeSentiment();
+    return {
+      score: sentiment.overall,
+      fearGreedIndex: sentiment.overall, // Use overall as proxy for now
+      socialVolume: sentiment.socialVolume
+    };
+  }
+
+  /**
    * Make a manual prediction for any supported market
    * Supports: ETH, BTC, SOL, AERO, DOGE, AVAX, MATIC, ARB, OP, etc.
    */

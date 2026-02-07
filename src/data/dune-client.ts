@@ -71,32 +71,49 @@ export class DuneAnalytics {
     }
 
     try {
-      const execution = await this.client.runSql({
-        query_sql: `
-          SELECT 
-            block_time as timestamp,
-            "from" as sender,
-            "to" as receiver,
-            value / 1e18 as eth_amount,
-            value / 1e18 * 2500 as usd_value -- Approximate ETH price
-          FROM base.transactions
-          WHERE block_time > now() - interval '24' hour
-          AND value / 1e18 > ${minValueUsd / 2500} -- Convert USD to ETH
-          ORDER BY value DESC
-          LIMIT 50
-        `,
-        performance: QueryEngine.Medium,
-      });
+      let rows: any[] = [];
+      const queryId = process.env.DUNE_QUERY_ID;
 
-      const transactions: WhaleTransaction[] = (execution.result?.rows || []).map((row: any) => ({
-        timestamp: row.timestamp,
-        sender: row.sender,
-        receiver: row.receiver,
-        ethAmount: Number(row.eth_amount),
-        usdValue: Number(row.usd_value),
-        direction: this.inferDirection(row.sender, row.receiver),
-        token: 'ETH'
-      }));
+      if (queryId) {
+        // Free Plan: Use pre-created Query ID
+        const execution = await this.client.refresh(Number(queryId));
+        rows = execution.result?.rows || [];
+      } else {
+        // Paid Plan: Use runSql for dynamic queries
+        const execution = await this.client.runSql({
+          query_sql: `
+            SELECT 
+              block_time as timestamp,
+              "from" as sender,
+              "to" as receiver,
+              value / 1e18 as eth_amount,
+              value / 1e18 * 2500 as usd_value -- Approximate ETH price
+            FROM base.transactions
+            WHERE block_time > now() - interval '24' hour
+            AND value / 1e18 > ${minValueUsd / 2500} -- Convert USD to ETH
+            ORDER BY value DESC
+            LIMIT 50
+          `,
+          performance: QueryEngine.Medium,
+        });
+        rows = execution.result?.rows || [];
+      }
+
+      const transactions: WhaleTransaction[] = rows.map((row: any) => {
+        if (rows.indexOf(row) === 0) console.log('🔍 Dune Row Keys:', Object.keys(row));
+        return {
+          timestamp: row.timestamp || row.block_time || row.evt_block_time,
+          sender: row.sender || row.from || row.tx_from || row.maker,
+          receiver: row.receiver || row.to || row.tx_to || row.taker,
+          ethAmount: Number(row.eth_amount || row.value || row.token_sold_amount || 0),
+          usdValue: Number(row.usd_value || row.amount_usd || 0),
+          direction: this.inferDirection(
+            row.sender || row.from || row.tx_from || row.maker,
+            row.receiver || row.to || row.tx_to || row.taker
+          ),
+          token: row.token_sold_symbol || 'ETH'
+        };
+      });
 
       this.cache.set(cacheKey, { data: transactions, timestamp: Date.now() });
       return transactions;
@@ -155,7 +172,15 @@ export class DuneAnalytics {
   /**
    * Infer transaction direction based on known addresses
    */
+  /**
+   * Infer transaction direction based on known addresses
+   */
   private inferDirection(from: string, to: string): 'buy' | 'sell' | 'transfer' {
+    if (!from || !to) {
+      console.warn('⚠️ Dune API returned incomplete row:', { from, to });
+      return 'transfer';
+    }
+
     // Known DEX router addresses on Base
     const dexAddresses = [
       '0x2626664c2603336E57B271c5C0b26F421741e481', // Uniswap V3

@@ -70,7 +70,7 @@ export class LobsterSage {
       takeProfitPercent: 10,
       stopLossPercent: 5,
       minApyThreshold: 2,
-      enabled: false, // Disabled by default for safety
+      enabled: true,
     });
   }
 

@@ -271,7 +271,7 @@ Accuracy score: 75%
 
 | Type | Address | Balance |
 |------|---------|---------|
-| CDP Wallet | `0xD7476C17Cfd60f67bdB15B235EeD963DaFAB9353` | ~0.1 ETH |
+| CDP Wallet | `0x87436a2aBbAE409Fed118bbeb055e842D0C890b4` | ~0.45 ETH |
 
 **Using Coinbase Developer Platform (CDP)** for:
 - Secure key management
@@ -313,10 +313,20 @@ Accuracy score: 75%
 |----------|--------|-------------|
 | `/trading/strategy` | GET | Get current trading strategy |
 | `/trading/strategy` | POST | **Configure take-profit/stop-loss** |
+| `/trading/mode` | POST | **Switch Strategy Mode** (conservative/aggressive/capitulation-fishing) |
 | `/trading/run-cycle` | POST | **Run complete trading cycle** |
+| `/trading/capitulation-check` | GET | **Check for market bottom signals** |
 | `/trading/enable` | POST | Enable autonomous trading |
 | `/trading/disable` | POST | Disable autonomous trading |
 | `/trading/history` | GET | Get trading action history |
+
+### Market Analysis Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/analysis` | GET | Current market analysis |
+| `/analysis/asset` | GET | Analyze specific asset (`?symbol=ETH`) |
+| `/analysis/tvl` | GET | **Monitor Base Protocol TVL** |
+| `/signals/whales` | GET | **Check Whale Movements via Dune** |
 
 ### Social Endpoints
 | Endpoint | Method | Description |

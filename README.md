@@ -176,15 +176,30 @@ Test Files  3 passed (3)
 
 All core tests passing. 3 skipped = CDP integration (requires credentials).
 
+## Proof of Work (Real Onchain Activity)
+
+### 1. Autonomous Prediction & Minting
+- **Market**: OP (Bullish) at $0.20
+- **Action**: Minted Prophecy NFT #prophecy_1770439723401_0x6b50a516
+- **Transaction**: [0x6b50a516...](https://sepolia.basescan.org/tx/0x6b50a51612d9e54637db3f8a1c80302154e588d08e6e04bb226f80c2bf4d0b0b)
+- **Social Proof**: Posted to Farcaster (Hash: 0x33a7...)
+
+### 2. Real DeFi Yield Farming
+- **Action**: Supply 0.001 WETH to Aave V3
+- **Step 1 (Wrap ETH)**: [0x349ce9f0...](https://sepolia.basescan.org/tx/0x349ce9f09005d6ffa6c6d66224b6ec1207ac517cf752efa56d3e00822ffa2da0)
+- **Step 2 (Supply Aave)**: [0x3129cd21...](https://sepolia.basescan.org/tx/0x3129cd213cf046700021c759cafc860e008a03d50f4afdec07c20d6805b44f91)
+
+---
+
 ## Roadmap
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
 | 1 | Core infrastructure | ✅ **COMPLETE** |
-| 2 | DeFi integration (Aave, Uniswap) | 🚧 **IN PROGRESS** |
-| 3 | Strategy engine | 📋 Planned |
-| 4 | Social integration | 📋 Planned |
-| 5 | OpenClaw skill | 📋 Planned |
+| 2 | DeFi integration (Aave, Uniswap) | ✅ **COMPLETE** |
+| 3 | Strategy engine | ✅ **COMPLETE** |
+| 4 | Social integration (Farcaster) | ✅ **COMPLETE** |
+| 5 | OpenClaw skill | ✅ **READY** |
 | 6 | Mainnet launch | 📋 Planned |
 
 ## License

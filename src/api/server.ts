@@ -103,11 +103,30 @@ app.get('/portfolio', requireSage, async (_req: Request, res: Response) => {
 
 app.post('/predict', requireSage, async (req: Request, res: Response) => {
   try {
-    const { market, timeframe } = req.body;
+    const { market, timeframe, stakeAmount } = req.body;
     const targetMarket = market || 'ETH';
     const targetTimeframe = timeframe || '7d';
     
+    // Validate stake amount if provided (0.004 - 0.06 ETH = ~$10-$150)
+    let validatedStake: number | undefined;
+    if (stakeAmount !== undefined) {
+      const stake = parseFloat(stakeAmount);
+      if (isNaN(stake) || stake < 0.004 || stake > 0.06) {
+        res.status(400).json({ 
+          error: 'stakeAmount must be between 0.004 and 0.06 ETH (~$10-$150)' 
+        });
+        return;
+      }
+      validatedStake = stake;
+    }
+    
     const prediction = await sage!.makePrediction(targetMarket, targetTimeframe);
+    
+    // Attach stake amount to prediction if provided
+    if (prediction && validatedStake) {
+      prediction.stakeAmount = validatedStake;
+    }
+    
     res.json(prediction);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -118,6 +137,20 @@ app.get('/predictions', requireSage, async (_req: Request, res: Response) => {
   try {
     const predictions = await sage!.getActivePredictions();
     res.json({ predictions });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get active positions with real-time P&L
+// Returns all active prophecies with current price, P&L, and remaining time
+app.get('/positions/active', requireSage, async (_req: Request, res: Response) => {
+  try {
+    const positions = await sage!.getActivePositionsWithPnL();
+    res.json({
+      count: positions.length,
+      positions
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -134,10 +167,66 @@ app.get('/analysis', requireSage, async (_req: Request, res: Response) => {
   }
 });
 
+// Individual asset analysis
+// GET /analysis/asset?symbol=SOL or /analysis/asset?symbol=AERO
+app.get('/analysis/asset', requireSage, async (req: Request, res: Response) => {
+  try {
+    const symbol = (req.query.symbol as string)?.toUpperCase();
+    
+    if (!symbol) {
+      res.status(400).json({ 
+        error: 'symbol query parameter required (e.g., ?symbol=SOL)' 
+      });
+      return;
+    }
+    
+    const analysis = await sage!.getAssetAnalysis(symbol);
+    
+    if (!analysis) {
+      res.status(404).json({ 
+        error: `Asset ${symbol} not found or not supported` 
+      });
+      return;
+    }
+    
+    res.json(analysis);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/trends', requireSage, async (_req: Request, res: Response) => {
   try {
     const trends = await sage!.getEcosystemTrends();
     res.json({ trends });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// TVL Analysis
+// GET /analysis/tvl
+app.get('/analysis/tvl', requireSage, async (_req: Request, res: Response) => {
+  try {
+    const tvl = await sage!.getTVLAnalysis();
+    res.json(tvl);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ Whale Signals ============
+
+// Get whale transaction signals
+// GET /signals/whales?minValue=50000
+app.get('/signals/whales', requireSage, async (req: Request, res: Response) => {
+  try {
+    const minValue = Number(req.query.minValue) || 50000;
+    const signals = await sage!.getWhaleSignals(minValue);
+    res.json({
+      count: signals.transactions.length,
+      ...signals
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -405,6 +494,41 @@ app.post('/trading/strategy', requireSage, async (req: Request, res: Response) =
       message: 'Trading strategy updated',
       strategy 
     });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Set trading mode (applies preset configuration)
+// POST /trading/mode { "mode": "conservative" | "aggressive" | "capitulation-fishing" }
+app.post('/trading/mode', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { mode } = req.body;
+    
+    if (!mode || !['conservative', 'aggressive', 'capitulation-fishing'].includes(mode)) {
+      res.status(400).json({ 
+        error: 'Invalid mode. Valid modes: conservative, aggressive, capitulation-fishing' 
+      });
+      return;
+    }
+    
+    const strategy = sage!.setTradingMode(mode);
+    res.json({ 
+      status: 'success',
+      message: `Trading mode set to: ${mode}`,
+      strategy 
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check for capitulation opportunities
+// GET /trading/capitulation-check
+app.get('/trading/capitulation-check', requireSage, async (_req: Request, res: Response) => {
+  try {
+    const result = await sage!.detectCapitulation();
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

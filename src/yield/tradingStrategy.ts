@@ -6,6 +6,7 @@
  */
 
 import { type Address } from 'viem';
+import { getCoinGecko, BASE_TOKEN_IDS } from '../data/coingecko';
 
 // ==========================================
 // TRADING STRATEGY TYPES
@@ -18,7 +19,36 @@ export interface TradingStrategy {
   rebalanceThreshold: number;    // APY improvement needed to rebalance (e.g., 3%)
   maxPositionSizeEth: number;    // Max position size in ETH
   enabled: boolean;              // Whether autonomous trading is enabled
+  mode?: TradingMode;            // Current trading mode
 }
+
+// Trading modes for different market conditions
+export type TradingMode = 'conservative' | 'aggressive' | 'capitulation-fishing';
+
+// Preset configurations for each trading mode
+export const MODE_PRESETS: Record<TradingMode, Partial<TradingStrategy>> = {
+  conservative: {
+    takeProfitPercent: 8,
+    stopLossPercent: 3,
+    minApyThreshold: 3,
+    maxPositionSizeEth: 0.5,
+    rebalanceThreshold: 4,
+  },
+  aggressive: {
+    takeProfitPercent: 15,
+    stopLossPercent: 8,
+    minApyThreshold: 1,
+    maxPositionSizeEth: 2,
+    rebalanceThreshold: 2,
+  },
+  'capitulation-fishing': {
+    takeProfitPercent: 25,
+    stopLossPercent: 15,
+    minApyThreshold: 0,  // Enter regardless of APY during capitulation
+    maxPositionSizeEth: 0.3,
+    rebalanceThreshold: 1,
+  },
+};
 
 export interface EnhancedPosition {
   id: string;
@@ -78,7 +108,7 @@ export class TradingStrategyManager {
       minApyThreshold: 2,         // Minimum 2% APY to enter
       rebalanceThreshold: 3,      // Rebalance if APY improves by 3%+
       maxPositionSizeEth: 1,      // Max 1 ETH per position
-      enabled: false,             // Disabled by default for safety
+      enabled: true,              // ENABLED per user request
       ...config,
     };
   }
@@ -95,6 +125,32 @@ export class TradingStrategyManager {
     this.strategy = { ...this.strategy, ...updates };
     console.log('📊 Trading strategy updated:', this.strategy);
     return this.strategy;
+  }
+
+  /**
+   * Set trading mode (applies preset configuration)
+   */
+  setMode(mode: TradingMode): TradingStrategy {
+    const preset = MODE_PRESETS[mode];
+    if (!preset) {
+      throw new Error(`Unknown trading mode: ${mode}. Valid modes: conservative, aggressive, capitulation-fishing`);
+    }
+    
+    this.strategy = { 
+      ...this.strategy, 
+      ...preset, 
+      mode 
+    };
+    
+    console.log(`🎯 Trading mode set to: ${mode}`);
+    return this.strategy;
+  }
+
+  /**
+   * Get current trading mode
+   */
+  getMode(): TradingMode | undefined {
+    return this.strategy.mode;
   }
 
   enableAutonomousTrading(): void {
@@ -352,16 +408,38 @@ export class TradingStrategyManager {
 // ==========================================
 
 export async function fetchTokenPrices(): Promise<Record<string, number>> {
-  // In production, fetch from CoinGecko, Chainlink, or similar
-  // For now, return reasonable mock prices
-  return {
-    'ETH': 2500,
-    'WETH': 2500,
-    'USDC': 1,
-    'USDbC': 1,
-    'DAI': 1,
-    'cbETH': 2600,
+  const coinGecko = getCoinGecko();
+  
+  // Map internal symbols to CoinGecko IDs
+  const symbolToId: Record<string, string> = {
+    'ETH': BASE_TOKEN_IDS.ETH || 'ethereum',
+    'WETH': BASE_TOKEN_IDS.WETH || 'weth',
+    'USDC': BASE_TOKEN_IDS.USDC || 'usd-coin',
+    'USDbC': 'bridged-usd-coin-base',
+    'DAI': BASE_TOKEN_IDS.DAI || 'dai',
+    'cbETH': BASE_TOKEN_IDS.CBETH || 'coinbase-wrapped-staked-eth',
   };
+
+  try {
+    const ids = Object.values(symbolToId);
+    const prices = await coinGecko.getSimplePrices(ids);
+    
+    const result: Record<string, number> = {};
+    for (const [symbol, id] of Object.entries(symbolToId)) {
+      if (prices[id]?.usd) {
+        result[symbol] = prices[id].usd;
+      } else {
+        console.warn(`⚠️ Price missing for ${symbol} (${id})`);
+        // Fallback to 0 or safe default? 
+        // User asked to remove mock data, so we won't hardcode values.
+        result[symbol] = 0;
+      }
+    }
+    return result;
+  } catch (error) {
+    console.error('❌ Failed to fetch token prices:', error);
+    return {};
+  }
 }
 
 export default TradingStrategyManager;

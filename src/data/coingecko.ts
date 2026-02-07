@@ -77,20 +77,37 @@ export interface GlobalData {
   market_cap_change_percentage_24h_usd: number;
 }
 
-// Token addresses on Base
+// Token symbols to CoinGecko IDs mapping
+// Supports both Base ecosystem tokens and cross-chain assets for predictions
 export const BASE_TOKEN_IDS: Record<string, string> = {
+  // Major Assets
   ETH: 'ethereum',
   WETH: 'weth',
+  BTC: 'bitcoin',
+  WBTC: 'wrapped-bitcoin',
+  SOL: 'solana',
+  
+  // Stablecoins
   USDC: 'usd-coin',
   USDT: 'tether',
   DAI: 'dai',
-  WBTC: 'wrapped-bitcoin',
-  CBETH: 'coinbase-wrapped-staked-eth',
+  
+  // Base Ecosystem
   AERO: 'aerodrome-finance',
+  CBETH: 'coinbase-wrapped-staked-eth',
+  
+  // DeFi Tokens
   COMP: 'compound-governance-token',
   AAVE: 'aave',
   UNI: 'uniswap',
   LINK: 'chainlink',
+  
+  // Popular Altcoins (for predictions)
+  DOGE: 'dogecoin',
+  AVAX: 'avalanche-2',
+  MATIC: 'matic-network',
+  ARB: 'arbitrum',
+  OP: 'optimism',
 };
 
 // ============ CoinGecko Client ============

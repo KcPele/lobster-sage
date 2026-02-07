@@ -104,22 +104,31 @@ curl -X POST https://lobster.up.railway.app/yields/withdraw \
   -H "Content-Type: application/json" \
   -d '{"token": "WETH", "amount": "all"}'
 
-# ===== AUTONOMOUS TRADING =====
-
+# ===== TRADING STRATEGY =====
+ 
 # Get trading strategy config
 curl https://lobster.up.railway.app/trading/strategy
-
+ 
 # Configure take-profit/stop-loss
 curl -X POST https://lobster.up.railway.app/trading/strategy \
   -H "Content-Type: application/json" \
   -d '{"takeProfitPercent": 15, "stopLossPercent": 5, "enabled": true}'
-
+ 
+# Switch Mode (conservative / aggressive / capitulation-fishing)
+curl -X POST https://lobster.up.railway.app/trading/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "capitulation-fishing"}'
+ 
+# Check manual capitulation signals
+curl https://lobster.up.railway.app/trading/capitulation-check
+ 
 # Run a complete trading cycle (scans opportunities, checks P&L, executes)
 curl -X POST https://lobster.up.railway.app/trading/run-cycle
-
-# View trading history
+ 
+# View history
 curl https://lobster.up.railway.app/trading/history
-```
+
+
 
 ## Option 1: Skill with HTTP API Server (Recommended)
 

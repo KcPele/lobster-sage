@@ -577,6 +577,27 @@ app.post('/trading/pure-cycle', requireSage, async (_req: Request, res: Response
   }
 });
 
+// Run dry-run trading cycle - ANALYZE ONLY, NO TRADES
+// Perfect for posting updates without executing transactions
+app.post('/trading/dry-run', requireSage, async (_req: Request, res: Response) => {
+  try {
+    console.log('📊 API: Running dry-run cycle (analysis only)...');
+    const result = await sage!.runDryRunTradingCycle();
+
+    res.json({
+      status: 'success',
+      message: 'Dry-run analysis complete - no trades executed',
+      mode: result.mode,
+      analysis: result.analysis,
+      timestamp: result.timestamp,
+      note: 'This is analysis only - no on-chain transactions',
+    });
+  } catch (error: any) {
+    console.error('Dry-run error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get trading action history
 app.get('/trading/history', requireSage, async (req: Request, res: Response) => {
   try {

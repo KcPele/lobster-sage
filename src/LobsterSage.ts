@@ -1058,14 +1058,75 @@ Built on @base with @coinbase AgentKit 🦞
         return { success: result.success, txHash: result.txHash };
       },
       enterPosition: async (opportunity, amountEth) => {
-        const result = await this.findBestOpportunityAndEnter({ 
-          amountEth, 
-          minApy: opportunity.apy 
+        const result = await this.findBestOpportunityAndEnter({
+          amountEth,
+          minApy: opportunity.apy
         });
         return { success: result.success, txHash: result.supplyTx };
       },
       updatePrices: fetchTokenPrices,
     });
+  }
+
+  /**
+   * Run dry-run trading cycle - ANALYZE ONLY, NO TRADES
+   * Perfect for posting updates without executing transactions
+   */
+  async runDryRunTradingCycle(): Promise<any> {
+    console.log('📊 STARTING DRY-RUN CYCLE (analysis only, no trades)');
+
+    // Update prices
+    const prices = await fetchTokenPrices();
+    this.tradingStrategy.updatePrices(prices);
+
+    // Get current positions
+    const positions = this.tradingStrategy.getPositions();
+    const portfolioPnL = this.tradingStrategy.calculatePortfolioPnL();
+
+    // Scan opportunities
+    const opportunities = await this.yieldOptimizer.scanOpportunities();
+
+    // Get portfolio summary
+    const portfolio = await this.getPortfolioSummary();
+
+    // Get market sentiment
+    const sentiment = await this.getMarketSentiment();
+
+    return {
+      mode: 'DRY_RUN',
+      tradesExecuted: 0,
+      analysis: {
+        portfolio: {
+          totalValue: portfolio.totalValue,
+          activePositions: positions.length,
+          unrealizedPnL: portfolioPnL.totalPnL,
+          unrealizedPnLPercent: portfolioPnL.totalPnLPercent,
+        },
+        opportunities: opportunities.map(op => ({
+          protocol: op.protocol,
+          strategy: op.strategy,
+          apy: op.apy,
+          risk: op.risk,
+          token: op.token,
+        })),
+        sentiment: {
+          score: sentiment.score,
+          fearGreedIndex: sentiment.fearGreedIndex,
+          socialVolume: sentiment.socialVolume,
+        },
+        positions: positions.map(p => ({
+          protocol: p.protocol,
+          strategy: p.strategy,
+          token: p.token,
+          amount: p.currentAmount,
+          apy: p.apy,
+          unrealizedPnLPercent: p.unrealizedPnLPercent,
+          entryTime: new Date(p.entryTime).toISOString(),
+        })),
+      },
+      timestamp: new Date().toISOString(),
+      note: 'No trades executed - analysis only',
+    };
   }
 
   /**

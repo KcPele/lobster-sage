@@ -424,9 +424,8 @@ export class UniswapV3 {
     const amountOutMinimum = quote.amountOut * (10000n - slippageBps) / 10000n;
 
     // Ensure approval (skip for ETH/WETH wrapping)
-    if (tokenIn !== this.tokens.WETH) {
-      await this.ensureApproval(tokenIn, amountIn);
-    }
+    // Ensure approval for all input tokens (including WETH)
+    await this.ensureApproval(tokenIn, amountIn);
 
     // Build swap parameters
     const swapParams = {

@@ -109,6 +109,16 @@ curl -X POST https://lobster.up.railway.app/yields/withdraw \
   -H "Content-Type: application/json" \
   -d '{"token": "WETH", "amount": "all"}'
 
+# Supply EXISTING token to Aave (e.g. you already have WETH/USDC)
+curl -X POST https://lobster.up.railway.app/yields/supply \
+  -H "Content-Type: application/json" \
+  -d '{"token": "WETH", "amount": "0.1"}'
+
+# Unwrap WETH to ETH
+curl -X POST https://lobster.up.railway.app/unwrap-weth \
+  -H "Content-Type: application/json" \
+  -d '{"amount": "0.1"}'
+
 # ===== TRADING STRATEGY =====
  
 # Get trading strategy config
@@ -583,6 +593,43 @@ export default function (api: any) {
     parameters: Type.Object({}),
     async execute() {
       const response = await fetch('https://lobster.up.railway.app/yields/positions');
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    },
+  });
+
+  // Supply EXISTING token (WETH/USDC) to Aave
+  api.registerTool({
+    name: "lobster_supply",
+    description: "Supply existing WETH or USDC to Aave V3. Use this if you already hold the token.",
+    parameters: Type.Object({
+      token: Type.String({ description: "Token symbol (WETH or USDC)" }),
+      amount: Type.String({ description: "Amount to supply" }),
+    }),
+    async execute(_id: string, params: { token: string, amount: string }) {
+      const response = await fetch('https://lobster.up.railway.app/yields/supply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: params.token, amount: params.amount }),
+      });
+      const data = await response.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    },
+  });
+
+  // Unwrap WETH
+  api.registerTool({
+    name: "lobster_unwrap",
+    description: "Unwrap WETH back to ETH",
+    parameters: Type.Object({
+      amount: Type.String({ description: "Amount of WETH to unwrap" }),
+    }),
+    async execute(_id: string, params: { amount: string }) {
+      const response = await fetch('https://lobster.up.railway.app/unwrap-weth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: params.amount }),
+      });
       const data = await response.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     },

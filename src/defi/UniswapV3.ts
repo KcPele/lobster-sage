@@ -343,7 +343,7 @@ export class UniswapV3 {
       const [amountOut, , , gasEstimate] = result.result as [bigint, bigint, number, bigint];
 
       // Calculate price impact (simplified)
-      const priceImpact = amountIn > 0n 
+      const priceImpact = amountIn > 0n
         ? Number((amountIn - amountOut) * 10000n / amountIn) / 100
         : 0;
 
@@ -358,6 +358,42 @@ export class UniswapV3 {
       console.error('Quote failed:', error);
       throw new Error(`Failed to get quote: ${error}`);
     }
+  }
+
+  /**
+   * Get swap quote with simplified interface for API
+   * Returns quote with slippage tolerance applied
+   */
+  async getSwapQuote(params: {
+    tokenIn: Address;
+    tokenOut: Address;
+    amountIn: bigint;
+    slippagePercent?: number;
+  }): Promise<{
+    amountIn: bigint;
+    amountOut: bigint;
+    priceImpact: number;
+    gasEstimate: bigint;
+    amountOutMinimum: bigint;
+  }> {
+    const quote = await this.getQuote(
+      params.tokenIn,
+      params.tokenOut,
+      params.amountIn
+    );
+
+    // Calculate minimum output with slippage
+    const slippagePercent = params.slippagePercent ?? 0.5;
+    const slippageBps = BigInt(Math.floor(slippagePercent * 100));
+    const amountOutMinimum = quote.amountOut * (10000n - slippageBps) / 10000n;
+
+    return {
+      amountIn: quote.amountIn,
+      amountOut: quote.amountOut,
+      priceImpact: quote.priceImpact,
+      gasEstimate: quote.gasEstimate,
+      amountOutMinimum,
+    };
   }
 
   /**

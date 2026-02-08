@@ -1,0 +1,1 @@
+- do not create large filw(do not write mode than 500lines of code in a single file)

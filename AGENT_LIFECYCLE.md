@@ -398,7 +398,7 @@ curl -X POST https://lobster.up.railway.app/predict-and-mint \
 
 ## Technical Stack
 
-- **Runtime:** Node.js + TypeScript
+- **Runtime:** Node.js + TypeScript (Modular Manager Architecture)
 - **Blockchain:** Base Sepolia (testnet) / Base Mainnet (production)
 - **Wallet:** Coinbase Developer Platform (CDP) AgentKit
 - **Contracts:** Solidity (ERC-721 + custom)

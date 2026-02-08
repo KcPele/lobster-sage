@@ -41,12 +41,17 @@ This guide explains how to integrate LobsterSage as an OpenClaw skill for the **
 │  ┌───────────────────────────────────────────────────────────────────┐   │
 │  │              LobsterSage API (Railway - EXECUTOR)                  │   │
 │  │                                                                    │   │
+│  │  [LobsterSage Orchestrator]                                        │   │
+│  │     │                                                              │   │
+│  │     ├── PortfolioManager  (Balances, Positions)                    │   │
+│  │     ├── TradingManager    (Strategy, Execution)                    │   │
+│  │     ├── YieldManager      (Aave, Optimization)                     │   │
+│  │     ├── MarketAnalyzer    (Data, Trends, Whales)                   │   │
+│  │     └── PredictionManager (AI, Prophecies, Social)                 │   │
+│  │                                                                    │   │
 │  │   POST /predict-and-mint     → Mint NFT onchain (0.011 ETH)       │   │
 │  │   POST /yields/supply-weth   → Wrap ETH + supply to Aave V3       │   │
 │  │   GET  /status               → Wallet balance, address             │   │
-│  │   GET  /portfolio            → Holdings, predictions               │   │
-│  │   GET  /reputation           → Accuracy score                      │   │
-│  │   GET  /yields               → DeFi yield opportunities            │   │
 │  └────────────────────────────────┬──────────────────────────────────┘   │
 │                                   │                                       │
 │                                   ▼                                       │

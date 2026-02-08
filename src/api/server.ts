@@ -99,6 +99,19 @@ app.get('/portfolio', requireSage, async (_req: Request, res: Response) => {
   }
 });
 
+// Get all token balances with USD values
+// GET /portfolio/balances
+app.get('/portfolio/balances', requireSage, async (_req: Request, res: Response) => {
+  try {
+    console.log('💰 API: Fetching all token balances with USD values...');
+    const balances = await sage!.getAllTokenBalances();
+    res.json(balances);
+  } catch (error: any) {
+    console.error('Get balances error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ Predictions ============
 
 app.post('/predict', requireSage, async (req: Request, res: Response) => {
@@ -156,6 +169,19 @@ app.get('/positions/active', requireSage, async (_req: Request, res: Response) =
   }
 });
 
+// Get all positions across protocols
+// Returns active predictions, Aave positions, and wallet holdings
+app.get('/positions/all', requireSage, async (_req: Request, res: Response) => {
+  try {
+    console.log('📊 API: Fetching all positions across protocols...');
+    const positions = await sage!.getAllPositions();
+    res.json(positions);
+  } catch (error: any) {
+    console.error('Get all positions error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ Market Analysis ============
 
 app.get('/analysis', requireSage, async (_req: Request, res: Response) => {
@@ -204,6 +230,19 @@ app.get('/trends', requireSage, async (_req: Request, res: Response) => {
   }
 });
 
+// Get market snapshot for trading decisions
+// Returns complete market state with regime, whale sentiment, liquidity, and recommendations
+app.get('/market/snapshot', requireSage, async (_req: Request, res: Response) => {
+  try {
+    console.log('📸 API: Generating market snapshot...');
+    const snapshot = await sage!.getMarketSnapshot();
+    res.json(snapshot);
+  } catch (error: any) {
+    console.error('Market snapshot error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // TVL Analysis
 // GET /analysis/tvl
 app.get('/analysis/tvl', requireSage, async (_req: Request, res: Response) => {
@@ -243,6 +282,45 @@ app.get('/yields', requireSage, async (_req: Request, res: Response) => {
   }
 });
 
+// Compound yield profits
+// POST /trade/compound { "amount": "0.1", "minApy": 2 }
+// Withdraws from current positions, swaps to best opportunity, re-supplies to maximize APY
+app.post('/trade/compound', requireSage, async (req: Request, res: Response) => {
+  try {
+    const { amount, minApy } = req.body;
+
+    console.log('🔄 API: Compounding yield profits...');
+    const result = await sage!.compoundYield({ amount, minApy });
+
+    if (result.success) {
+      // Generate basescan URLs for transactions
+      const network = process.env.NETWORK_ID || 'base-sepolia';
+      const basescanDomain = network === 'base-mainnet' ? 'basescan.org' : 'sepolia.basescan.org';
+
+      const stepsWithUrls = result.steps.map((step: any) => ({
+        ...step,
+        basescanUrl: step.txHash ? `https://${basescanDomain}/tx/${step.txHash}` : undefined
+      }));
+
+      res.json({
+        status: 'success',
+        message: `Successfully compounded $${result.totalProfitUsd?.toFixed(2)} of yield`,
+        totalProfitUsd: result.totalProfitUsd,
+        steps: stepsWithUrls
+      });
+    } else {
+      res.status(400).json({
+        status: 'failed',
+        error: result.error,
+        steps: result.steps
+      });
+    }
+  } catch (error: any) {
+    console.error('Compound yield error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/yields/optimize', requireSage, async (_req: Request, res: Response) => {
   try {
     const result = await sage!.optimizeYields();
@@ -256,6 +334,27 @@ app.get('/yields/positions', requireSage, async (_req: Request, res: Response) =
   try {
     const positions = await sage!.getYieldPositions();
     res.json({ positions });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/yields/aave/balance', requireSage, async (req: Request, res: Response) => {
+  try {
+    const asset = (req.query.asset as string) || 'WETH';
+    
+    if (!asset) {
+      res.status(400).json({ error: 'asset query parameter required (e.g., ?asset=WETH)' });
+      return;
+    }
+
+    const balance = await sage!.getAaveAssetBalance(asset);
+    
+    res.json({
+      asset: asset.toUpperCase(),
+      ...balance,
+      netBalance: (parseFloat(balance.supplied) - parseFloat(balance.stableDebt) - parseFloat(balance.variableDebt)).toString()
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -302,12 +401,62 @@ app.post('/yields/supply-weth', requireSage, async (req: Request, res: Response)
 
 // ============ Full Trading Cycle Endpoints ============
 
+// Get swap quote before executing
+// GET /swap/quote?tokenIn=ETH&tokenOut=USDC&amount=1.0&slippage=0.5
+// Returns expected output, price impact, and gas estimate
+app.get('/swap/quote', requireSage, async (req: Request, res: Response) => {
+  try {
+    const tokenIn = req.query.tokenIn as string;
+    const tokenOut = req.query.tokenOut as string;
+    const amount = req.query.amount as string;
+    const slippage = Number(req.query.slippage) || 0.5;
+
+    if (!tokenIn || !tokenOut || !amount) {
+      res.status(400).json({
+        error: 'tokenIn, tokenOut, and amount query parameters are required',
+        example: '/swap/quote?tokenIn=ETH&tokenOut=USDC&amount=1.0&slippage=0.5'
+      });
+      return;
+    }
+
+    console.log(`💱 API: Getting swap quote for ${amount} ${tokenIn} → ${tokenOut}...`);
+    const quote = await sage!.getSwapQuote({
+      tokenIn,
+      tokenOut,
+      amount,
+      slippage
+    });
+
+    if (quote.error) {
+      res.status(400).json({
+        error: quote.error,
+        query: { tokenIn, tokenOut, amount, slippage }
+      });
+      return;
+    }
+
+    res.json({
+      tokenIn,
+      tokenOut,
+      amountIn: quote.amountIn,
+      amountOut: quote.amountOut,
+      priceImpact: quote.priceImpact,
+      gasEstimate: quote.gasEstimate,
+      route: quote.route,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Swap quote error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Universal Token Swap
 // POST /swap { "tokenIn": "ETH", "tokenOut": "USDC", "amount": "0.1", "slippage": 1 }
 app.post('/swap', requireSage, async (req: Request, res: Response) => {
   try {
     const { tokenIn, tokenOut, amount, slippage } = req.body;
-    
+
     if (!tokenIn || !tokenOut || !amount) {
       res.status(400).json({ error: 'tokenIn, tokenOut, and amount are required' });
       return;
@@ -315,7 +464,7 @@ app.post('/swap', requireSage, async (req: Request, res: Response) => {
 
     console.log(`💱 API: Swapping ${amount} ${tokenIn} → ${tokenOut}...`);
     const result = await sage!.swapTokens({ tokenIn, tokenOut, amount, slippage });
-    
+
     if (result.success) {
       res.json({
         status: 'success',
@@ -818,22 +967,29 @@ initSage().then(() => {
     console.log(`
 🦞 ═══════════════════════════════════════════════════════
    LobsterSage API Server Running
-   
+
    URL: http://localhost:${PORT}
-   
+
    Core Endpoints (for OpenClaw):
    GET  /health           - Health check
    GET  /status           - Agent status & wallet info
    POST /predict-and-mint - Make prediction + mint NFT (REAL TX!)
    GET  /portfolio        - Portfolio summary
    GET  /reputation       - Reputation score
-   
+
+   NEW High-Priority Trading Endpoints:
+   GET  /portfolio/balances     - ALL token balances with USD values
+   GET  /positions/all          - ALL positions across protocols
+   GET  /market/snapshot        - Complete market state + recommendations
+   POST /trade/compound         - Compound yield profits for max APY
+   GET  /swap/quote             - Get swap quote before executing
+
    Analysis Endpoints:
    POST /predict          - Make prediction only
    GET  /analysis         - Market analysis
    GET  /trends           - Ecosystem trends
    GET  /yields           - Yield opportunities
-   
+
    OpenClaw orchestrates scheduling - this API just executes!
 ═══════════════════════════════════════════════════════ 🦞
     `);

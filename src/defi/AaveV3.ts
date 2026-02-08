@@ -88,6 +88,30 @@ export const AAVE_V3_POOL_ABI = [
   },
 ] as const;
 
+// Aave V3 Protocol Data Provider ABI
+export const AAVE_V3_DATA_PROVIDER_ABI = [
+  {
+    inputs: [
+      { internalType: 'address', name: 'asset', type: 'address' },
+      { internalType: 'address', name: 'user', type: 'address' },
+    ],
+    name: 'getUserReserveData',
+    outputs: [
+      { internalType: 'uint256', name: 'currentATokenBalance', type: 'uint256' },
+      { internalType: 'uint256', name: 'currentStableDebt', type: 'uint256' },
+      { internalType: 'uint256', name: 'currentVariableDebt', type: 'uint256' },
+      { internalType: 'uint256', name: 'principalStableDebt', type: 'uint256' },
+      { internalType: 'uint256', name: 'scaledVariableDebt', type: 'uint256' },
+      { internalType: 'uint256', name: 'stableBorrowRate', type: 'uint256' },
+      { internalType: 'uint256', name: 'liquidityRate', type: 'uint256' },
+      { internalType: 'uint40', name: 'stableRateLastUpdated', type: 'uint40' },
+      { internalType: 'bool', name: 'usageAsCollateralEnabled', type: 'bool' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
 // ERC20 ABI for approvals
 export const ERC20_ABI = [
   {
@@ -123,12 +147,12 @@ export const ERC20_ABI = [
 export const AAVE_ADDRESSES = {
   base: {
     pool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5' as Address,
-    poolDataProvider: '0x2d8A3C567805972153fc67B4693D429b04e843Bd' as Address,
+    poolDataProvider: '0x2D8a3c567805972153fC67b4693d429B04E843bd' as Address,
     rewardsController: '0xf9cc4F0D883F4379D0d4F4667FE33898eADf6ad7' as Address,
   },
   baseSepolia: {
     pool: '0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27' as Address,
-    poolDataProvider: '0xa69D14FB5819297C3824a36a7C3b813Ab625B4Aa' as Address,
+    poolDataProvider: '0xBc9f5b7E248451CdD7cA54e717a2BFe1F32b566b' as Address,
     rewardsController: '0x0000000000000000000000000000000000000000' as Address,
   },
 };
@@ -203,6 +227,7 @@ export class AaveV3 {
   private publicClient: PublicClient;
   private walletClient?: WalletClient;
   private poolAddress: Address;
+  private dataProviderAddress: Address;
   private chain: Chain;
 
   constructor(
@@ -212,6 +237,7 @@ export class AaveV3 {
   ) {
     this.chain = network === 'base' ? base : baseSepolia;
     this.poolAddress = AAVE_ADDRESSES[network].pool;
+    this.dataProviderAddress = AAVE_ADDRESSES[network].poolDataProvider;
     this.walletClient = walletClient;
 
     this.publicClient = createPublicClient({
@@ -594,6 +620,37 @@ export class AaveV3 {
       return receipt.status === 'success';
     } catch {
       return false;
+    }
+  }
+
+
+  /**
+   * Get asset balance data for a user
+   * @param asset - Token address to check
+   * @param user - User address
+   * @returns Supplied and debt amounts
+   */
+  async getAssetBalance(asset: Address, user: Address): Promise<{ supplied: bigint, stableDebt: bigint, variableDebt: bigint }> {
+    try {
+      const data = await this.publicClient.readContract({
+        address: this.dataProviderAddress,
+        abi: AAVE_V3_DATA_PROVIDER_ABI,
+        functionName: 'getUserReserveData',
+        args: [asset, user],
+      });
+
+      return {
+        supplied: data[0],
+        stableDebt: data[1],
+        variableDebt: data[2],
+      };
+    } catch (error) {
+      console.error('getAssetBalance error:', error);
+      throw new AaveV3Error(
+        `Failed to get asset balance for ${asset}`,
+        'ASSET_BALANCE_ERROR',
+        error as Error
+      );
     }
   }
 }

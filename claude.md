@@ -1,1 +1,2 @@
 - do not create large filw(do not write mode than 500lines of code in a single file)
+- dont commit and set claude code as the author. never do that again

@@ -9,9 +9,10 @@
  */
 
 import type { WalletManager } from '../wallet/manager';
-import type { UniswapV3 } from '../defi/UniswapV3';
+import { UniswapV3, BASE_TOKENS, SEPOLIA_TOKENS } from '../defi/UniswapV3';
 import type { AaveV3 } from '../defi/AaveV3';
 import { YieldOptimizer } from '../yield/optimizer';
+import { parseUnits } from 'viem';
 
 export interface YieldOpportunity {
   protocol: string;
@@ -51,14 +52,20 @@ export interface BestOpportunityResult {
  * YieldManager class for handling all yield operations
  */
 export class YieldManager {
+  private wallet: WalletManager;
+  private uniswap: UniswapV3;
+  private aave: AaveV3;
   private yieldOptimizer: YieldOptimizer;
 
   constructor(
-    _wallet: WalletManager,
-    _uniswap: UniswapV3,
-    _aave: AaveV3,
+    wallet: WalletManager,
+    uniswap: UniswapV3,
+    aave: AaveV3,
     yieldOptimizer: YieldOptimizer
   ) {
+    this.wallet = wallet;
+    this.uniswap = uniswap;
+    this.aave = aave;
     this.yieldOptimizer = yieldOptimizer;
   }
 
@@ -144,6 +151,86 @@ export class YieldManager {
    */
   async rebalance(allocation: any): Promise<any> {
     return this.yieldOptimizer.rebalance(allocation);
+  }
+
+  /**
+   * Resolve a token symbol to its on-chain address
+   */
+  private async resolveTokenAddress(symbol: string): Promise<`0x${string}`> {
+    const networkId = await this.wallet.getNetworkId();
+    const TOKENS: any = networkId === 'base-mainnet' ? BASE_TOKENS : SEPOLIA_TOKENS;
+    const key = symbol.toUpperCase() === 'ETH' ? 'WETH' : symbol.toUpperCase();
+    const address = TOKENS[key];
+    if (!address) throw new Error(`Unsupported token: ${symbol}`);
+    return address as `0x${string}`;
+  }
+
+  /**
+   * Borrow tokens from Aave V3
+   */
+  async borrowFromAave(
+    token: string,
+    amount: string,
+    interestRateMode: 'stable' | 'variable' = 'variable'
+  ): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    try {
+      const tokenAddress = await this.resolveTokenAddress(token);
+      const decimals = ['USDC', 'USDBC'].includes(token.toUpperCase()) ? 6 : 18;
+      const amountBigInt = parseUnits(amount, decimals);
+      const rateMode = interestRateMode === 'stable' ? 1 : 2;
+
+      const txHash = await this.aave.borrow(tokenAddress, amountBigInt, rateMode);
+      await this.aave.waitForTransaction(txHash);
+
+      return { success: true, txHash };
+    } catch (error: any) {
+      console.error('Borrow error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Repay Aave V3 debt
+   */
+  async repayAave(
+    token: string,
+    amount: string,
+    interestRateMode: 'stable' | 'variable' = 'variable'
+  ): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    try {
+      const tokenAddress = await this.resolveTokenAddress(token);
+      const decimals = ['USDC', 'USDBC'].includes(token.toUpperCase()) ? 6 : 18;
+      const rateMode = interestRateMode === 'stable' ? 1 : 2;
+
+      let amountBigInt: bigint;
+      if (amount === 'all') {
+        // Use max uint256 to repay all debt
+        amountBigInt = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+      } else {
+        amountBigInt = parseUnits(amount, decimals);
+      }
+
+      // Ensure approval for repayment
+      if (amount !== 'all') {
+        await this.uniswap.ensureApproval(tokenAddress, amountBigInt);
+      }
+
+      const txHash = await this.aave.repay(tokenAddress, amountBigInt, rateMode);
+      await this.aave.waitForTransaction(txHash);
+
+      return { success: true, txHash };
+    } catch (error: any) {
+      console.error('Repay error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get full Aave account data (collateral, debt, health factor)
+   */
+  async getAaveAccountData(): Promise<any> {
+    const walletAddress = await this.wallet.getAddress();
+    return this.aave.getFormattedUserAccountData(walletAddress as `0x${string}`);
   }
 
   /**

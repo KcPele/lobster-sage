@@ -1,13 +1,4 @@
-/**
- * TradingManager - Handles all trading operations
- *
- * Handles:
- * - Token swaps via Uniswap V3
- * - WETH wrapping/unwrapping
- * - Swap quotes and price impact calculations
- * - Yield compounding
- * - Trading strategy management
- */
+/** TradingManager - Token swaps, quotes, compounding, and trading strategy */
 
 import { WalletManager } from '../wallet/manager';
 import { UniswapV3, BASE_TOKENS, SEPOLIA_TOKENS } from '../defi/UniswapV3';
@@ -16,6 +7,7 @@ import { YieldOptimizer } from '../yield/optimizer';
 import { TradingStrategyManager, fetchTokenPrices } from '../yield/tradingStrategy';
 import { getCoinGecko } from '../data/coingecko';
 import { parseUnits, formatUnits } from 'viem';
+import * as leverage from './LeverageManager';
 
 export interface SwapParams {
   tokenIn: string;
@@ -62,9 +54,6 @@ export interface TradingMode {
   mode: 'conservative' | 'aggressive' | 'capitulation-fishing';
 }
 
-/**
- * TradingManager class for handling all trading operations
- */
 export class TradingManager {
   private wallet: WalletManager;
   private uniswap: UniswapV3;
@@ -86,26 +75,37 @@ export class TradingManager {
     this.tradingStrategy = tradingStrategy;
   }
 
-  /**
-   * Swap any token pair via Uniswap V3
-   * Handles ETH wrapping/unwrapping automatically
-   */
-  async swapTokens(params: SwapParams): Promise<any> {
-    return this.yieldOptimizer.swapTokens(params);
+  async swapTokens(params: SwapParams): Promise<any> { return this.yieldOptimizer.swapTokens(params); }
+
+  async unwrapWeth(amount: string): Promise<any> { return this.uniswap.unwrapWeth(amount); }
+
+  async wrapEth(amount: string): Promise<any> { return this.uniswap.wrapEth(amount); }
+
+  async swapAndSupply(params: {
+    tokenIn: string; tokenOut: string; amount: string; slippage?: number; supplyToAave?: boolean;
+  }): Promise<any> {
+    return leverage.swapAndSupply(params, (p) => this.swapTokens(p), (t, a) => this.yieldOptimizer.supplyToAave(t, a));
   }
 
-  /**
-   * Unwrap WETH to ETH
-   */
-  async unwrapWeth(amount: string): Promise<any> {
-    if (!this.uniswap) throw new Error('Uniswap not initialized');
-    return this.uniswap.unwrapWeth(amount);
+  async openLeveragedPosition(params: {
+    supplyToken: string; borrowToken: string; initialAmount: string;
+    loops?: number; minHealthFactor?: number;
+    borrowFn: (token: string, amount: string, mode: 'variable') => Promise<any>;
+    supplyFn: (token: string, amount: string) => Promise<any>;
+    getAccountData: () => Promise<any>;
+  }): Promise<any> {
+    return leverage.openLeveragedPosition(params, (p) => this.swapTokens(p));
   }
 
-  /**
-   * Get swap quote before executing
-   * Returns expected output, price impact, and gas estimate
-   */
+  async closeLeveragedPosition(params: {
+    supplyToken: string; debtToken: string;
+    repayFn: (token: string, amount: string, mode: 'variable') => Promise<any>;
+    withdrawFn: (token: string, amount?: string) => Promise<any>;
+    getAccountData: () => Promise<any>;
+  }): Promise<any> {
+    return leverage.closeLeveragedPosition(params, (p) => this.swapTokens(p));
+  }
+
   async getSwapQuote(params: SwapParams): Promise<SwapQuote> {
     try {
       const { tokenIn, tokenOut, amount, slippage = 0.5 } = params;
@@ -187,10 +187,6 @@ export class TradingManager {
     }
   }
 
-  /**
-   * Compound yield profits by withdrawing, swapping, and re-supplying
-   * Automatically finds the best opportunity and reinvests profits
-   */
   async compoundYield(params: CompoundYieldParams = {}): Promise<CompoundYieldResult> {
     const steps: Array<{
       action: string;
@@ -355,159 +351,52 @@ export class TradingManager {
     }
   }
 
-  // ==========================================
-  // TRADING STRATEGY METHODS
-  // ==========================================
+  // ==================== Trading Strategy ====================
 
-  /**
-   * Get current trading strategy
-   */
-  getTradingStrategy(): any {
-    return this.tradingStrategy.getStrategy();
+  getTradingStrategy(): any { return this.tradingStrategy.getStrategy(); }
+  setTradingStrategy(updates: TradingStrategyConfig): any { return this.tradingStrategy.setStrategy(updates); }
+  setTradingMode(mode: 'conservative' | 'aggressive' | 'capitulation-fishing'): any { return this.tradingStrategy.setMode(mode); }
+  enableAutonomousTrading(): void { this.tradingStrategy.enableAutonomousTrading(); }
+  disableAutonomousTrading(): void { this.tradingStrategy.disableAutonomousTrading(); }
+  getTradingHistory(limit: number = 20): any[] { return this.tradingStrategy.getActionHistory(limit); }
+
+  private buildCycleHandlers(withdrawFn: (token: string) => any, enterFn: (opp: any, amt: string) => any) {
+    return {
+      getOpportunities: () => this.yieldOptimizer.scanOpportunities(),
+      exitPosition: async (pos: any) => { const r = await withdrawFn(pos.token); return { success: r.success, txHash: r.txHash }; },
+      enterPosition: async (opp: any, amt: string) => { const r = await enterFn(opp, amt); return { success: r.success, txHash: r.supplyTx }; },
+      updatePrices: fetchTokenPrices,
+    };
   }
 
-  /**
-   * Update trading strategy
-   */
-  setTradingStrategy(updates: TradingStrategyConfig): any {
-    return this.tradingStrategy.setStrategy(updates);
-  }
-
-  /**
-   * Set trading mode (applies preset configuration)
-   * @param mode - 'conservative' | 'aggressive' | 'capitulation-fishing'
-   */
-  setTradingMode(mode: 'conservative' | 'aggressive' | 'capitulation-fishing'): any {
-    return this.tradingStrategy.setMode(mode);
-  }
-
-  /**
-   * Enable autonomous trading
-   */
-  enableAutonomousTrading(): void {
-    this.tradingStrategy.enableAutonomousTrading();
-  }
-
-  /**
-   * Disable autonomous trading
-   */
-  disableAutonomousTrading(): void {
-    this.tradingStrategy.disableAutonomousTrading();
-  }
-
-  /**
-   * Get trading action history
-   */
-  getTradingHistory(limit: number = 20): any[] {
-    return this.tradingStrategy.getActionHistory(limit);
-  }
-
-  /**
-   * Run a complete trading cycle
-   * Checks positions for exit signals, finds opportunities, executes trades
-   */
-  async runTradingCycle(_getAllPositions: () => any, withdrawFn: (token: string) => any, enterFn: (opportunity: any, amountEth: string) => any): Promise<any> {
-    console.log('STARTING FULL AUTONOMOUS CYCLE');
-
-    // Update prices first
+  async runTradingCycle(_getAll: () => any, withdrawFn: (token: string) => any, enterFn: (opp: any, amt: string) => any): Promise<any> {
     const prices = await fetchTokenPrices();
     this.tradingStrategy.updatePrices(prices);
-
-    return this.tradingStrategy.runTradingCycle({
-      getOpportunities: () => this.yieldOptimizer.scanOpportunities(),
-      exitPosition: async (position) => {
-        const result = await withdrawFn(position.token);
-        return { success: result.success, txHash: result.txHash };
-      },
-      enterPosition: async (opportunity, amountEth) => {
-        const result = await enterFn(opportunity, amountEth);
-        return { success: result.success, txHash: result.supplyTx };
-      },
-      updatePrices: fetchTokenPrices,
-    });
+    return this.tradingStrategy.runTradingCycle(this.buildCycleHandlers(withdrawFn, enterFn));
   }
 
-  /**
-   * Run pure DeFi trading cycle WITHOUT NFT minting
-   * This is for competition mode - shows real trading activity only
-   */
-  async runPureTradingCycle(_getAllPositions: () => any, withdrawFn: (token: string) => any, enterFn: (opportunity: any, amountEth: string) => any): Promise<any> {
-    console.log('STARTING PURE DEFI TRADING CYCLE (no NFTs)');
-
-    // Update prices first
+  async runPureTradingCycle(_getAll: () => any, withdrawFn: (token: string) => any, enterFn: (opp: any, amt: string) => any): Promise<any> {
     const prices = await fetchTokenPrices();
     this.tradingStrategy.updatePrices(prices);
-
-    // Run the trading strategy with real DeFi transactions
-    return this.tradingStrategy.runTradingCycle({
-      getOpportunities: () => this.yieldOptimizer.scanOpportunities(),
-      exitPosition: async (position) => {
-        const result = await withdrawFn(position.token);
-        return { success: result.success, txHash: result.txHash };
-      },
-      enterPosition: async (opportunity, amountEth) => {
-        const result = await enterFn(opportunity, amountEth);
-        return { success: result.success, txHash: result.supplyTx };
-      },
-      updatePrices: fetchTokenPrices,
-    });
+    return this.tradingStrategy.runTradingCycle(this.buildCycleHandlers(withdrawFn, enterFn));
   }
 
-  /**
-   * Run dry-run trading cycle - ANALYZE ONLY, NO TRADES
-   * Perfect for posting updates without executing transactions
-   */
   async runDryRunTradingCycle(getPortfolioSummary: () => any, getMarketSentiment: () => any): Promise<any> {
-    console.log('STARTING DRY-RUN CYCLE (analysis only, no trades)');
-
-    // Update prices
     const prices = await fetchTokenPrices();
     this.tradingStrategy.updatePrices(prices);
-
-    // Get current positions
     const positions = this.tradingStrategy.getPositions();
     const portfolioPnL = this.tradingStrategy.calculatePortfolioPnL();
-
-    // Scan opportunities
     const opportunities = await this.yieldOptimizer.scanOpportunities();
-
-    // Get portfolio summary
     const portfolio = await getPortfolioSummary();
-
-    // Get market sentiment
     const sentiment = await getMarketSentiment();
 
     return {
-      mode: 'DRY_RUN',
-      tradesExecuted: 0,
+      mode: 'DRY_RUN', tradesExecuted: 0,
       analysis: {
-        portfolio: {
-          totalValue: portfolio.totalValue,
-          activePositions: positions.length,
-          unrealizedPnL: portfolioPnL.totalPnL,
-          unrealizedPnLPercent: portfolioPnL.totalPnLPercent,
-        },
-        opportunities: opportunities.map(op => ({
-          protocol: op.protocol,
-          strategy: op.strategy,
-          apy: op.apy,
-          risk: op.risk,
-          token: op.token,
-        })),
-        sentiment: {
-          score: sentiment.score,
-          fearGreedIndex: sentiment.fearGreedIndex,
-          socialVolume: sentiment.socialVolume,
-        },
-        positions: positions.map(p => ({
-          protocol: p.protocol,
-          strategy: p.strategy,
-          token: p.token,
-          amount: p.currentAmount,
-          apy: p.apy,
-          unrealizedPnLPercent: p.unrealizedPnLPercent,
-          entryTime: new Date(p.entryTime).toISOString(),
-        })),
+        portfolio: { totalValue: portfolio.totalValue, activePositions: positions.length, unrealizedPnL: portfolioPnL.totalPnL, unrealizedPnLPercent: portfolioPnL.totalPnLPercent },
+        opportunities: opportunities.map((op: any) => ({ protocol: op.protocol, strategy: op.strategy, apy: op.apy, risk: op.risk, token: op.token })),
+        sentiment: { score: sentiment.score, fearGreedIndex: sentiment.fearGreedIndex, socialVolume: sentiment.socialVolume },
+        positions: positions.map((p: any) => ({ protocol: p.protocol, strategy: p.strategy, token: p.token, amount: p.currentAmount, apy: p.apy, unrealizedPnLPercent: p.unrealizedPnLPercent, entryTime: new Date(p.entryTime).toISOString() })),
       },
       timestamp: new Date().toISOString(),
       note: 'No trades executed - analysis only',

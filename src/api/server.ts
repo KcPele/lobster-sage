@@ -13,6 +13,7 @@ import {
   createYieldRoutes,
   createPortfolioRoutes,
   createAnalysisRoutes,
+  createSocialRoutes,
 } from './routes';
 
 const app: Application = express();
@@ -93,6 +94,7 @@ app.use(requireSage, createTradingRoutes(getSage));
 app.use(requireSage, createYieldRoutes(getSage));
 app.use(requireSage, createPortfolioRoutes(getSage));
 app.use(requireSage, createAnalysisRoutes(getSage));
+app.use(requireSage, createSocialRoutes(getSage));
 
 // ============ Error Handling ============
 
@@ -122,6 +124,7 @@ Portfolio:  GET  /portfolio, /portfolio/balances, /positions/all, /positions/act
 Analysis:   GET  /analysis, /analysis/asset, /analysis/tvl, /trends, /market/snapshot
 Strategy:   GET  /trading/strategy, /trading/history, /trading/capitulation-check
             POST /trading/mode, /trading/run-cycle, /trading/pure-cycle, /trading/dry-run
+Social:     POST /farcaster/post, /farcaster/thread
     `);
   });
 });

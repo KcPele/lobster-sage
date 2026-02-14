@@ -18,6 +18,7 @@ import { UniswapV3 } from './defi/UniswapV3';
 import { TradingStrategyManager } from './yield/tradingStrategy';
 import { getConfig, Config } from './config';
 import { PortfolioSummary, AutonomousConfig } from './types';
+import { FarcasterClient } from './social/farcaster-client';
 
 // Import managers
 import {
@@ -42,6 +43,7 @@ export class LobsterSage {
   private uniswap!: UniswapV3;
   private tradingStrategy: TradingStrategyManager;
   private config: Config;
+  private farcaster: FarcasterClient | null = null;
 
   // Managers
   private portfolioManager!: PortfolioManager;
@@ -153,6 +155,16 @@ export class LobsterSage {
       this.aave,
       this.yieldOptimizer
     );
+
+    // Initialize Farcaster client if configured
+    if (this.config.farcasterEnabled && process.env.NEYNAR_API_KEY) {
+      this.farcaster = new FarcasterClient({
+        apiKey: process.env.NEYNAR_API_KEY,
+        signerUuid: process.env.NEYNAR_SIGNER_UUID || '',
+        fid: parseInt(process.env.FARCASTER_FID || '0'),
+      });
+      console.log('📡 Farcaster client initialized');
+    }
 
     const address = await this.wallet.getAddress();
     const balance = await this.wallet.getBalance();
@@ -327,6 +339,30 @@ export class LobsterSage {
       withdrawFn: (t, a) => this.withdrawFromAave(t, a),
       getAccountData: () => this.getAaveAccountData(),
     });
+  }
+
+  // ==========================================
+  // SOCIAL / FARCASTER
+  // ==========================================
+
+  async postToFarcaster(text: string): Promise<any> {
+    if (!this.farcaster) return { success: false, error: 'Farcaster not configured. Set NEYNAR_API_KEY, NEYNAR_SIGNER_UUID, and FARCASTER_FID env vars.' };
+    try {
+      const result = await this.farcaster.postCast({ text });
+      return { success: true, hash: result.hash, text: result.text };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async postFarcasterThread(casts: string[]): Promise<any> {
+    if (!this.farcaster) return { success: false, error: 'Farcaster not configured' };
+    try {
+      const results = await this.farcaster.postThread(casts);
+      return { success: true, casts: results };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
   }
 
   // ==========================================

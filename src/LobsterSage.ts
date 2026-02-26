@@ -16,6 +16,7 @@ import { YieldOptimizer } from './yield/optimizer';
 import { AaveV3 } from './defi/AaveV3';
 import { UniswapV3 } from './defi/UniswapV3';
 import { TradingStrategyManager } from './yield/tradingStrategy';
+import { getDcaManager } from './yield/dcaStrategy';
 import { getConfig, Config } from './config';
 import { PortfolioSummary, AutonomousConfig } from './types';
 import { FarcasterClient } from './social/farcaster-client';
@@ -146,7 +147,8 @@ export class LobsterSage {
       this.uniswap,
       this.aave,
       this.yieldOptimizer,
-      this.tradingStrategy
+      this.tradingStrategy,
+      this.marketAnalyzer
     );
 
     this.yieldManager = new YieldManager(
@@ -200,6 +202,26 @@ export class LobsterSage {
         if (now - this.lastYieldCheck >= config.yieldCheckInterval) {
           await this.yieldManager.runYieldCycle();
           this.lastYieldCheck = now;
+        }
+
+        // Execute due DCA plans
+        const dcaManager = getDcaManager();
+        const duePlans = dcaManager.getDuePlans();
+        for (const plan of duePlans) {
+          try {
+            const result = await this.yieldOptimizer.findBestOpportunityAndEnter({
+              amountEth: plan.amountPerSlice.toString(),
+              minApy: 0,
+            });
+            dcaManager.recordExecution(plan.id, {
+              success: result.success,
+              txHash: result.supplyTx,
+              error: result.error,
+            });
+            console.log(`DCA slice ${plan.slicesExecuted + 1}/${plan.numSlices} for plan ${plan.id}: ${result.success ? 'success' : 'failed'}`);
+          } catch (e: any) {
+            dcaManager.recordExecution(plan.id, { success: false, error: e.message });
+          }
         }
 
         // Sleep before next check

@@ -15,6 +15,7 @@ import { Prophesier } from '../sage/prophesier';
 import { OnchainReputationSystem } from '../sage/reputation';
 import { YieldOptimizer } from '../yield/optimizer';
 import { getCoinGecko } from '../data/coingecko';
+import { getTokenDecimals, isStablecoin } from '../defi/token-registry';
 import { PortfolioSummary } from '../types';
 
 export interface TokenBalance {
@@ -169,16 +170,16 @@ export class PortfolioManager {
       try {
         const balance = await this.uniswap.getTokenBalance(tokenAddress);
         if (balance > 0n) {
-          const decimals = tokenSymbol === 'USDbC' || tokenSymbol === 'DAI' ? 6 : 18;
+          const decimals = getTokenDecimals(tokenSymbol);
           const balanceFormatted = Number(balance) / (10 ** decimals);
 
-          // Get price (USDbC and DAI are pegged to USD)
-          const usdValue = tokenSymbol === 'USDbC' || tokenSymbol === 'DAI'
+          // Get price (stablecoins are pegged to USD)
+          const usdValue = isStablecoin(tokenSymbol)
             ? balanceFormatted
             : balanceFormatted * ethPrice;
 
           tokens[tokenSymbol] = {
-            balance: balanceFormatted.toFixed(decimals === 6 ? 2 : 6),
+            balance: balanceFormatted.toFixed(decimals <= 6 ? 2 : 6),
             usdValue: Number(usdValue.toFixed(2))
           };
           totalUsd += usdValue;
@@ -226,8 +227,7 @@ export class PortfolioManager {
       walletAddress as `0x${string}`
     );
 
-    // Format based on decimals (USDC is 6, others 18 usually)
-    const decimals = (symbol === 'USDC' || symbol === 'USDBC') ? 6 : 18;
+    const decimals = getTokenDecimals(symbol);
 
     return {
       supplied: (Number(balance.supplied) / (10 ** decimals)).toString(),

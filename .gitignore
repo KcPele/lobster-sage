@@ -11,3 +11,4 @@ coverage/
 .DS_Store
 deployments/*.json
 !deployments/.gitkeep
+/data/

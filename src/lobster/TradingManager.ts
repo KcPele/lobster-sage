@@ -5,8 +5,10 @@ import { UniswapV3, BASE_TOKENS, SEPOLIA_TOKENS } from '../defi/UniswapV3';
 import { AaveV3 } from '../defi/AaveV3';
 import { YieldOptimizer } from '../yield/optimizer';
 import { TradingStrategyManager, fetchTokenPrices } from '../yield/tradingStrategy';
+import { MarketAnalyzer } from './MarketAnalyzer';
 import { getCoinGecko } from '../data/coingecko';
 import { parseUnits, formatUnits } from 'viem';
+import { getTokenDecimals } from '../defi/token-registry';
 import * as leverage from './LeverageManager';
 
 export interface SwapParams {
@@ -60,19 +62,22 @@ export class TradingManager {
   private aave: AaveV3;
   private yieldOptimizer: YieldOptimizer;
   private tradingStrategy: TradingStrategyManager;
+  private marketAnalyzer: MarketAnalyzer | null;
 
   constructor(
     wallet: WalletManager,
     uniswap: UniswapV3,
     aave: AaveV3,
     yieldOptimizer: YieldOptimizer,
-    tradingStrategy: TradingStrategyManager
+    tradingStrategy: TradingStrategyManager,
+    marketAnalyzer?: MarketAnalyzer
   ) {
     this.wallet = wallet;
     this.uniswap = uniswap;
     this.aave = aave;
     this.yieldOptimizer = yieldOptimizer;
     this.tradingStrategy = tradingStrategy;
+    this.marketAnalyzer = marketAnalyzer || null;
   }
 
   async swapTokens(params: SwapParams): Promise<any> { return this.yieldOptimizer.swapTokens(params); }
@@ -145,8 +150,8 @@ export class TradingManager {
       }
 
       // Get decimals
-      const decimalsIn = (tokenIn.toUpperCase() === 'USDC' || tokenIn.toUpperCase() === 'USDBC') ? 6 : 18;
-      const decimalsOut = (tokenOut.toUpperCase() === 'USDC' || tokenOut.toUpperCase() === 'USDBC') ? 6 : 18;
+      const decimalsIn = getTokenDecimals(tokenIn);
+      const decimalsOut = getTokenDecimals(tokenOut);
 
       // Convert amount to bigint
       const amountIn = parseUnits(amount, decimalsIn);
@@ -366,6 +371,7 @@ export class TradingManager {
       exitPosition: async (pos: any) => { const r = await withdrawFn(pos.token); return { success: r.success, txHash: r.txHash }; },
       enterPosition: async (opp: any, amt: string) => { const r = await enterFn(opp, amt); return { success: r.success, txHash: r.supplyTx }; },
       updatePrices: fetchTokenPrices,
+      getMarketSnapshot: this.marketAnalyzer ? () => this.marketAnalyzer!.getMarketSnapshot() : undefined,
     };
   }
 

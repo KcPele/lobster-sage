@@ -1,10 +1,4 @@
-/**
- * Aave V3 Protocol Integration
- * 
- * Handles lending, borrowing, and account management on Aave V3
- * Network: Base Mainnet & Base Sepolia
- */
-
+/** Aave V3 Protocol Integration for Base Mainnet & Sepolia */
 import {
   createPublicClient,
   http,
@@ -16,153 +10,22 @@ import {
   type Chain,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
+import {
+  AAVE_V3_POOL_ABI,
+  AAVE_V3_DATA_PROVIDER_ABI,
+  ERC20_ABI,
+  AAVE_ADDRESSES,
+  InterestRateMode,
+} from './aave-abis';
 
-// Aave V3 Pool ABI
-export const AAVE_V3_POOL_ABI = [
-  // Supply
-  {
-    inputs: [
-      { internalType: 'address', name: 'asset', type: 'address' },
-      { internalType: 'uint256', name: 'amount', type: 'uint256' },
-      { internalType: 'address', name: 'onBehalfOf', type: 'address' },
-      { internalType: 'uint16', name: 'referralCode', type: 'uint16' },
-    ],
-    name: 'supply',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  // Withdraw
-  {
-    inputs: [
-      { internalType: 'address', name: 'asset', type: 'address' },
-      { internalType: 'uint256', name: 'amount', type: 'uint256' },
-      { internalType: 'address', name: 'to', type: 'address' },
-    ],
-    name: 'withdraw',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  // Borrow
-  {
-    inputs: [
-      { internalType: 'address', name: 'asset', type: 'address' },
-      { internalType: 'uint256', name: 'amount', type: 'uint256' },
-      { internalType: 'uint256', name: 'interestRateMode', type: 'uint256' },
-      { internalType: 'uint16', name: 'referralCode', type: 'uint16' },
-      { internalType: 'address', name: 'onBehalfOf', type: 'address' },
-    ],
-    name: 'borrow',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  // Repay
-  {
-    inputs: [
-      { internalType: 'address', name: 'asset', type: 'address' },
-      { internalType: 'uint256', name: 'amount', type: 'uint256' },
-      { internalType: 'uint256', name: 'interestRateMode', type: 'uint256' },
-      { internalType: 'address', name: 'onBehalfOf', type: 'address' },
-    ],
-    name: 'repay',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  // Get User Account Data
-  {
-    inputs: [{ internalType: 'address', name: 'user', type: 'address' }],
-    name: 'getUserAccountData',
-    outputs: [
-      { internalType: 'uint256', name: 'totalCollateralBase', type: 'uint256' },
-      { internalType: 'uint256', name: 'totalDebtBase', type: 'uint256' },
-      { internalType: 'uint256', name: 'availableBorrowsBase', type: 'uint256' },
-      { internalType: 'uint256', name: 'currentLiquidationThreshold', type: 'uint256' },
-      { internalType: 'uint256', name: 'ltv', type: 'uint256' },
-      { internalType: 'uint256', name: 'healthFactor', type: 'uint256' },
-    ],
-    stateMutability: 'view',
-    type: 'function',
-  },
-] as const;
-
-// Aave V3 Protocol Data Provider ABI
-export const AAVE_V3_DATA_PROVIDER_ABI = [
-  {
-    inputs: [
-      { internalType: 'address', name: 'asset', type: 'address' },
-      { internalType: 'address', name: 'user', type: 'address' },
-    ],
-    name: 'getUserReserveData',
-    outputs: [
-      { internalType: 'uint256', name: 'currentATokenBalance', type: 'uint256' },
-      { internalType: 'uint256', name: 'currentStableDebt', type: 'uint256' },
-      { internalType: 'uint256', name: 'currentVariableDebt', type: 'uint256' },
-      { internalType: 'uint256', name: 'principalStableDebt', type: 'uint256' },
-      { internalType: 'uint256', name: 'scaledVariableDebt', type: 'uint256' },
-      { internalType: 'uint256', name: 'stableBorrowRate', type: 'uint256' },
-      { internalType: 'uint256', name: 'liquidityRate', type: 'uint256' },
-      { internalType: 'uint40', name: 'stableRateLastUpdated', type: 'uint40' },
-      { internalType: 'bool', name: 'usageAsCollateralEnabled', type: 'bool' },
-    ],
-    stateMutability: 'view',
-    type: 'function',
-  },
-] as const;
-
-// ERC20 ABI for approvals
-export const ERC20_ABI = [
-  {
-    inputs: [
-      { internalType: 'address', name: 'spender', type: 'address' },
-      { internalType: 'uint256', name: 'amount', type: 'uint256' },
-    ],
-    name: 'approve',
-    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-  {
-    inputs: [
-      { internalType: 'address', name: 'owner', type: 'address' },
-      { internalType: 'address', name: 'spender', type: 'address' },
-    ],
-    name: 'allowance',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [],
-    name: 'decimals',
-    outputs: [{ internalType: 'uint8', name: '', type: 'uint8' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-] as const;
-
-// Protocol addresses
-export const AAVE_ADDRESSES = {
-  base: {
-    pool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5' as Address,
-    poolDataProvider: '0x2D8a3c567805972153fC67b4693d429B04E843bd' as Address,
-    rewardsController: '0xf9cc4F0D883F4379D0d4F4667FE33898eADf6ad7' as Address,
-  },
-  baseSepolia: {
-    pool: '0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27' as Address,
-    poolDataProvider: '0xBc9f5b7E248451CdD7cA54e717a2BFe1F32b566b' as Address,
-    rewardsController: '0x0000000000000000000000000000000000000000' as Address,
-  },
+// Re-export for external consumers
+export {
+  AAVE_V3_POOL_ABI,
+  AAVE_V3_DATA_PROVIDER_ABI,
+  ERC20_ABI,
+  AAVE_ADDRESSES,
+  InterestRateMode,
 };
-
-// Interest rate modes
-export enum InterestRateMode {
-  NONE = 0,
-  STABLE = 1,
-  VARIABLE = 2,
-}
 
 // User account data interface
 export interface UserAccountData {
@@ -220,9 +83,6 @@ export class HealthFactorTooLowError extends AaveV3Error {
   }
 }
 
-/**
- * Aave V3 Protocol Integration Class
- */
 export class AaveV3 {
   private publicClient: PublicClient;
   private walletClient?: WalletClient;
@@ -246,16 +106,10 @@ export class AaveV3 {
     });
   }
 
-  /**
-   * Set wallet client for write operations
-   */
   setWalletClient(walletClient: WalletClient): void {
     this.walletClient = walletClient;
   }
 
-  /**
-   * Ensure wallet client is available for write operations
-   */
   private ensureWalletClient(): WalletClient {
     if (!this.walletClient) {
       throw new AaveV3Error(
@@ -266,9 +120,6 @@ export class AaveV3 {
     return this.walletClient;
   }
 
-  /**
-   * Get the account address from wallet client
-   */
   private getAccount(): Address {
     const wallet = this.ensureWalletClient();
     if (!wallet.account) {
@@ -280,9 +131,6 @@ export class AaveV3 {
     return wallet.account.address;
   }
 
-  /**
-   * Check and handle token approval
-   */
   private async ensureApproval(
     tokenAddress: Address,
     amount: bigint
@@ -321,15 +169,6 @@ export class AaveV3 {
     }
   }
 
-  /**
-   * Supply assets to Aave
-   * @param asset - Token address to supply
-   * @param amount - Amount to supply (in token units)
-   * @param onBehalfOf - Address to supply on behalf of (defaults to sender)
-   * @param referralCode - Referral code (default 0)
-   * @param options - Transaction options
-   * @returns Transaction hash
-   */
   async supply(
     asset: Address,
     amount: bigint,
@@ -369,14 +208,6 @@ export class AaveV3 {
     }
   }
 
-  /**
-   * Withdraw assets from Aave
-   * @param asset - Token address to withdraw
-   * @param amount - Amount to withdraw (in token units, use max uint256 for all)
-   * @param to - Address to send withdrawn assets to (defaults to sender)
-   * @param options - Transaction options
-   * @returns Transaction hash
-   */
   async withdraw(
     asset: Address,
     amount: bigint,
@@ -418,16 +249,6 @@ export class AaveV3 {
     }
   }
 
-  /**
-   * Borrow assets from Aave
-   * @param asset - Token address to borrow
-   * @param amount - Amount to borrow (in token units)
-   * @param interestRateMode - Interest rate mode (STABLE or VARIABLE)
-   * @param referralCode - Referral code (default 0)
-   * @param onBehalfOf - Address to borrow on behalf of (defaults to sender)
-   * @param options - Transaction options
-   * @returns Transaction hash
-   */
   async borrow(
     asset: Address,
     amount: bigint,
@@ -473,15 +294,6 @@ export class AaveV3 {
     }
   }
 
-  /**
-   * Repay borrowed assets
-   * @param asset - Token address to repay
-   * @param amount - Amount to repay (in token units, use max uint256 for full repayment)
-   * @param interestRateMode - Interest rate mode of the debt
-   * @param onBehalfOf - Address to repay on behalf of (defaults to sender)
-   * @param options - Transaction options
-   * @returns Transaction hash
-   */
   async repay(
     asset: Address,
     amount: bigint,

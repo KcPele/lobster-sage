@@ -1,16 +1,10 @@
-/**
- * Trading Strategy & Autonomous Trading Loop
- * 
- * Manages P&L tracking, take-profit/stop-loss, and autonomous decision making.
- * Separated from optimizer to keep files under 500 lines.
- */
-
+/** Trading Strategy & Autonomous Trading Loop */
 import { type Address } from 'viem';
 import { getCoinGecko, BASE_TOKEN_IDS } from '../data/coingecko';
-
-// ==========================================
-// TRADING STRATEGY TYPES
-// ==========================================
+import { saveJson, loadJson } from '../utils/persistence';
+import { getTradingConstants } from '../config/trading';
+import { getPerformanceTracker } from './performanceTracker';
+import type { MarketSnapshot } from '../lobster/MarketAnalyzer';
 
 export interface TradingStrategy {
   takeProfitPercent: number;     // Exit when up by this % (e.g., 10 = +10%)
@@ -73,6 +67,10 @@ export interface EnhancedPosition {
   unrealizedPnL: number;         // Dollar P&L
   unrealizedPnLPercent: number;  // Percentage P&L
   earnedInterest: number;        // Interest earned
+
+  // Trailing stop
+  highWaterMark: number;         // Peak price since entry
+  trailingStopPercent: number;   // Trailing stop distance from peak
 }
 
 export interface TradingAction {
@@ -92,10 +90,6 @@ export interface TradingCycleResult {
   error?: string;
 }
 
-// ==========================================
-// TRADING STRATEGY MANAGER
-// ==========================================
-
 export class TradingStrategyManager {
   private strategy: TradingStrategy;
   private positions: EnhancedPosition[] = [];
@@ -103,19 +97,19 @@ export class TradingStrategyManager {
 
   constructor(config?: Partial<TradingStrategy>) {
     this.strategy = {
-      takeProfitPercent: 10,      // Take profit at +10%
-      stopLossPercent: 5,         // Stop loss at -5%
-      minApyThreshold: 2,         // Minimum 2% APY to enter
-      rebalanceThreshold: 3,      // Rebalance if APY improves by 3%+
-      maxPositionSizeEth: 1,      // Max 1 ETH per position
-      enabled: true,              // ENABLED per user request
+      takeProfitPercent: 10,
+      stopLossPercent: 5,
+      minApyThreshold: 2,
+      rebalanceThreshold: 3,
+      maxPositionSizeEth: 1,
+      enabled: true,
       ...config,
     };
+    // Load persisted state
+    this.positions = loadJson<EnhancedPosition[]>('trading-positions.json', []);
+    this.actionHistory = loadJson<TradingAction[]>('trading-history.json', []);
   }
 
-  // ==========================================
-  // STRATEGY CONFIGURATION
-  // ==========================================
 
   getStrategy(): TradingStrategy {
     return { ...this.strategy };
@@ -163,33 +157,44 @@ export class TradingStrategyManager {
     console.log('⏸️ Autonomous trading DISABLED');
   }
 
-  // ==========================================
-  // POSITION MANAGEMENT
-  // ==========================================
 
-  addPosition(position: Omit<EnhancedPosition, 'id' | 'unrealizedPnL' | 'unrealizedPnLPercent'>): EnhancedPosition {
+  addPosition(position: Omit<EnhancedPosition, 'id' | 'unrealizedPnL' | 'unrealizedPnLPercent' | 'highWaterMark' | 'trailingStopPercent'>): EnhancedPosition {
     const id = `${position.protocol}-${position.token}-${Date.now()}`;
     const enhanced: EnhancedPosition = {
       ...position,
       id,
       unrealizedPnL: 0,
       unrealizedPnLPercent: 0,
+      highWaterMark: position.currentPrice,
+      trailingStopPercent: this.strategy.stopLossPercent,
     };
     this.positions.push(enhanced);
+    saveJson('trading-positions.json', this.positions);
     return enhanced;
   }
 
   removePosition(id: string): void {
+    const pos = this.positions.find(p => p.id === id);
+    if (pos) {
+      getPerformanceTracker().recordClosedPosition({
+        id: pos.id,
+        protocol: pos.protocol,
+        token: pos.token,
+        entryPrice: pos.entryPrice,
+        exitPrice: pos.currentPrice,
+        entryTime: pos.entryTime,
+        pnl: pos.unrealizedPnL,
+        pnlPercent: pos.unrealizedPnLPercent,
+      });
+    }
     this.positions = this.positions.filter(p => p.id !== id);
+    saveJson('trading-positions.json', this.positions);
   }
 
   getPositions(): EnhancedPosition[] {
     return [...this.positions];
   }
 
-  // ==========================================
-  // P&L CALCULATIONS
-  // ==========================================
 
   updatePrices(priceMap: Record<string, number>): void {
     for (const position of this.positions) {
@@ -198,6 +203,11 @@ export class TradingStrategyManager {
       position.currentValueUsd = position.currentAmount * newPrice;
       position.unrealizedPnL = position.currentValueUsd - position.entryValueUsd;
       position.unrealizedPnLPercent = (position.unrealizedPnL / position.entryValueUsd) * 100;
+
+      // Update trailing stop high-water mark
+      if (newPrice > (position.highWaterMark || 0)) {
+        position.highWaterMark = newPrice;
+      }
     }
   }
 
@@ -215,16 +225,29 @@ export class TradingStrategyManager {
     return { totalEntryValue, totalCurrentValue, totalPnL, totalPnLPercent };
   }
 
-  // ==========================================
-  // TRADING DECISIONS
-  // ==========================================
 
   shouldTakeProfit(position: EnhancedPosition): boolean {
     return position.unrealizedPnLPercent >= this.strategy.takeProfitPercent;
   }
 
-  shouldStopLoss(position: EnhancedPosition): boolean {
-    return position.unrealizedPnLPercent <= -this.strategy.stopLossPercent;
+  shouldStopLoss(position: EnhancedPosition, marketRegime?: string): boolean {
+    let threshold = this.strategy.stopLossPercent;
+    // Tighten stop-loss in bearish/volatile markets
+    if (marketRegime === 'bearish' || marketRegime === 'volatile') {
+      threshold *= 1 - getTradingConstants().stopLoss.bearishTighteningPercent / 100;
+    }
+
+    // Fixed stop-loss from entry
+    if (position.unrealizedPnLPercent <= -threshold) return true;
+
+    // Trailing stop-loss from peak
+    if (position.highWaterMark > 0 && position.currentPrice > 0) {
+      const trailingPercent = position.trailingStopPercent || threshold;
+      const dropFromPeak = ((position.highWaterMark - position.currentPrice) / position.highWaterMark) * 100;
+      if (dropFromPeak >= trailingPercent) return true;
+    }
+
+    return false;
   }
 
   shouldEnter(apy: number, _currentPositionCount: number): boolean {
@@ -239,12 +262,8 @@ export class TradingStrategyManager {
     return improvement >= this.strategy.rebalanceThreshold;
   }
 
-  // ==========================================
-  // DECISION ENGINE
-  // ==========================================
 
-  analyzePosition(position: EnhancedPosition): TradingAction {
-    // Check take profit
+  analyzePosition(position: EnhancedPosition, marketRegime?: string): TradingAction {
     if (this.shouldTakeProfit(position)) {
       return {
         type: 'EXIT',
@@ -254,8 +273,7 @@ export class TradingStrategyManager {
       };
     }
 
-    // Check stop loss
-    if (this.shouldStopLoss(position)) {
+    if (this.shouldStopLoss(position, marketRegime)) {
       return {
         type: 'EXIT',
         reason: `Stop loss triggered: ${position.unrealizedPnLPercent.toFixed(2)}% (threshold: -${this.strategy.stopLossPercent}%)`,
@@ -288,75 +306,85 @@ export class TradingStrategyManager {
     return null;
   }
 
-  // ==========================================
-  // ACTION HISTORY
-  // ==========================================
 
   recordAction(action: TradingAction): void {
     this.actionHistory.push(action);
-    // Keep last 100 actions
-    if (this.actionHistory.length > 100) {
-      this.actionHistory = this.actionHistory.slice(-100);
+    const maxActions = getTradingConstants().history.maxActions;
+    if (this.actionHistory.length > maxActions) {
+      this.actionHistory = this.actionHistory.slice(-maxActions);
     }
+    saveJson('trading-history.json', this.actionHistory);
   }
 
   getActionHistory(limit: number = 20): TradingAction[] {
     return this.actionHistory.slice(-limit);
   }
 
-  // ==========================================
-  // TRADING CYCLE EXECUTION
-  // ==========================================
-
-  /**
-   * Run a complete trading cycle
-   * @param callbacks - Functions to execute actual trades
-   */
+  /** Run a complete trading cycle */
   async runTradingCycle(callbacks: {
     getOpportunities: () => Promise<any[]>;
     exitPosition: (position: EnhancedPosition) => Promise<{ success: boolean; txHash?: string }>;
     enterPosition: (opportunity: any, amountEth: string) => Promise<{ success: boolean; txHash?: string }>;
     updatePrices?: () => Promise<Record<string, number>>;
+    getMarketSnapshot?: () => Promise<MarketSnapshot>;
   }): Promise<TradingCycleResult> {
     const actions: TradingAction[] = [];
 
     try {
-      console.log('🔄 Starting trading cycle...');
+      console.log('Starting trading cycle...');
 
-      // Step 1: Update prices if callback provided
+      // Step 1: Update prices
       if (callbacks.updatePrices) {
         const prices = await callbacks.updatePrices();
         this.updatePrices(prices);
-        console.log('💰 Prices updated');
+      }
+
+      // Step 1.5: Get market context
+      let marketSnapshot: MarketSnapshot | null = null;
+      if (callbacks.getMarketSnapshot) {
+        try {
+          marketSnapshot = await callbacks.getMarketSnapshot();
+          console.log(`Market regime: ${marketSnapshot.regime}, action: ${marketSnapshot.recommendedAction}, confidence: ${marketSnapshot.confidence}%`);
+        } catch (e) {
+          console.warn('Could not fetch market snapshot, proceeding without');
+        }
       }
 
       // Step 2: Check existing positions for exit signals
-      console.log(`📊 Checking ${this.positions.length} positions...`);
       for (const position of this.positions) {
-        const decision = this.analyzePosition(position);
-        
+        const decision = this.analyzePosition(position, marketSnapshot?.regime);
+
         if (decision.type === 'EXIT' && this.strategy.enabled) {
-          console.log(`🚨 ${decision.reason}`);
-          
-          // Execute exit
           const result = await callbacks.exitPosition(position);
           if (result.success) {
             decision.txHash = result.txHash;
             this.removePosition(position.id);
-            console.log(`✅ Exited position: ${result.txHash}`);
           }
         }
-        
+
         actions.push(decision);
         this.recordAction(decision);
       }
 
       // Step 3: Look for new opportunities
       const opportunities = await callbacks.getOpportunities();
-      console.log(`🔍 Found ${opportunities.length} opportunities`);
+      console.log(`Found ${opportunities.length} opportunities`);
 
-      // Step 4: Enter best opportunity if strategy is enabled
-      if (this.strategy.enabled && this.positions.length === 0) {
+      // Step 4: Enter best opportunity (gated by market signals)
+      let skipEntry = false;
+      if (marketSnapshot) {
+        if (marketSnapshot.recommendedAction === 'exit') {
+          console.log('Market signals recommend EXIT - skipping new entries');
+          skipEntry = true;
+          actions.push({ type: 'HOLD', reason: `Market ${marketSnapshot.regime} - signals recommend exit (confidence: ${marketSnapshot.confidence}%)`, timestamp: Date.now() });
+        } else if (marketSnapshot.recommendedAction === 'wait' && marketSnapshot.confidence > getTradingConstants().confidence.marketSkipThreshold) {
+          console.log('Market signals recommend WAIT (high confidence) - skipping entry');
+          skipEntry = true;
+          actions.push({ type: 'HOLD', reason: `Market wait signal (confidence: ${marketSnapshot.confidence}%)`, timestamp: Date.now() });
+        }
+      }
+
+      if (this.strategy.enabled && this.positions.length === 0 && !skipEntry) {
         const bestOpp = opportunities
           .filter(o => o.apy >= this.strategy.minApyThreshold)
           .sort((a, b) => b.apy - a.apy)[0];
@@ -369,20 +397,17 @@ export class TradingStrategyManager {
             timestamp: Date.now(),
           };
 
-          const amountEth = Math.min(this.strategy.maxPositionSizeEth, 0.1).toString();
+          const amountEth = Math.min(this.strategy.maxPositionSizeEth, getTradingConstants().entry.defaultSizeEth).toString();
           const result = await callbacks.enterPosition(bestOpp, amountEth);
-          
+
           if (result.success) {
             enterAction.txHash = result.txHash;
-            console.log(`✅ Entered position: ${result.txHash}`);
           }
 
           actions.push(enterAction);
           this.recordAction(enterAction);
         }
       }
-
-      console.log(`✅ Trading cycle complete: ${actions.length} actions`);
 
       return {
         success: true,
@@ -391,7 +416,7 @@ export class TradingStrategyManager {
         opportunitiesScanned: opportunities.length,
       };
     } catch (error: any) {
-      console.error('❌ Trading cycle failed:', error.message);
+      console.error('Trading cycle failed:', error.message);
       return {
         success: false,
         actions,
@@ -403,9 +428,6 @@ export class TradingStrategyManager {
   }
 }
 
-// ==========================================
-// SIMPLE PRICE FETCHER (Mock for now)
-// ==========================================
 
 export async function fetchTokenPrices(): Promise<Record<string, number>> {
   const coinGecko = getCoinGecko();

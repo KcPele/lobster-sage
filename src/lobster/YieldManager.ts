@@ -13,6 +13,8 @@ import { UniswapV3, BASE_TOKENS, SEPOLIA_TOKENS } from '../defi/UniswapV3';
 import type { AaveV3 } from '../defi/AaveV3';
 import { YieldOptimizer } from '../yield/optimizer';
 import { parseUnits } from 'viem';
+import { getTokenDecimals } from '../defi/token-registry';
+import { getPerformanceTracker } from '../yield/performanceTracker';
 
 export interface YieldOpportunity {
   protocol: string;
@@ -175,7 +177,7 @@ export class YieldManager {
   ): Promise<{ success: boolean; txHash?: string; error?: string }> {
     try {
       const tokenAddress = await this.resolveTokenAddress(token);
-      const decimals = ['USDC', 'USDBC'].includes(token.toUpperCase()) ? 6 : 18;
+      const decimals = getTokenDecimals(token);
       const amountBigInt = parseUnits(amount, decimals);
       const rateMode = interestRateMode === 'stable' ? 1 : 2;
 
@@ -199,7 +201,7 @@ export class YieldManager {
   ): Promise<{ success: boolean; txHash?: string; error?: string }> {
     try {
       const tokenAddress = await this.resolveTokenAddress(token);
-      const decimals = ['USDC', 'USDBC'].includes(token.toUpperCase()) ? 6 : 18;
+      const decimals = getTokenDecimals(token);
       const rateMode = interestRateMode === 'stable' ? 1 : 2;
 
       let amountBigInt: bigint;
@@ -268,6 +270,14 @@ export class YieldManager {
     // Execute rebalancing
     const rebalanceTx = await this.yieldOptimizer.rebalance(allocation);
     console.log(`Rebalanced: ${rebalanceTx.hash}`);
+
+    // Record equity snapshot for drawdown tracking
+    try {
+      const ethBalance = parseFloat(await this.wallet.getBalance());
+      getPerformanceTracker().recordEquitySnapshot(ethBalance);
+    } catch (_e) {
+      // Non-critical; skip if balance check fails
+    }
 
     console.log('Yield cycle complete');
   }

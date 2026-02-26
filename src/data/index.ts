@@ -28,3 +28,10 @@ export {
   type TrendingCoin,
   type GlobalData,
 } from './coingecko';
+
+export {
+  ApyAggregator,
+  getApyAggregator,
+  resetApyAggregator,
+  type TokenApy,
+} from './apy-aggregator';
